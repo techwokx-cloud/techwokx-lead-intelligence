@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -6,7 +8,6 @@ from modules.crm import get_dashboard_stats, get_all_companies
 from modules.database import get_session, Company
 from sqlalchemy import desc
 
-st.set_page_config(page_title="Dashboard — TechWokx LIE", layout="wide")
 st.title("📊 Dashboard")
 
 stats = get_dashboard_stats()

@@ -1,7 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
 import streamlit as st
-from dotenv import load_dotenv; load_dotenv()
-st.set_page_config(page_title="Website Audit — TechWokx LIE", layout="wide")
-from modules.theme import THEME_CSS; st.markdown(THEME_CSS, unsafe_allow_html=True)
 from modules.website_verifier import verify_website
 from modules.technology_detector import detect_technologies
 

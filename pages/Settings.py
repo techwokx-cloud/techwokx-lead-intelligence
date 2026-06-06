@@ -1,14 +1,12 @@
+from dotenv import load_dotenv
+load_dotenv()
 import streamlit as st
-from dotenv import load_dotenv; load_dotenv()
-st.set_page_config(page_title="Settings — TechWokx LIE", layout="wide")
-from modules.theme import THEME_CSS; st.markdown(THEME_CSS, unsafe_allow_html=True)
 import os
 from pathlib import Path
 from dotenv import set_key
 from modules.database import DB_PATH, engine
 from modules.crm import get_dashboard_stats
 
-load_dotenv()
 ENV_FILE = Path(".env")
 
 st.markdown("# ⚙️ Settings")

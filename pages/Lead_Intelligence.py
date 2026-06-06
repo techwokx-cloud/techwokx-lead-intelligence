@@ -1,7 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
 import streamlit as st
-from dotenv import load_dotenv; load_dotenv()
-st.set_page_config(page_title="Intelligence — TechWokx LIE", layout="wide")
-from modules.theme import THEME_CSS; st.markdown(THEME_CSS, unsafe_allow_html=True)
 from modules.ai_analysis import generate_ai_analysis
 from modules.crm import get_all_companies, get_company, log_activity
 import os

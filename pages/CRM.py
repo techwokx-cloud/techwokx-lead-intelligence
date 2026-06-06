@@ -1,7 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
 import streamlit as st
-from dotenv import load_dotenv; load_dotenv()
-st.set_page_config(page_title="CRM — TechWokx LIE", layout="wide")
-from modules.theme import THEME_CSS; st.markdown(THEME_CSS, unsafe_allow_html=True)
 import pandas as pd
 from modules.crm import get_all_companies, get_company, update_stage, log_activity, CRM_STAGES
 from modules.database import get_session, Company, Activity, Contact

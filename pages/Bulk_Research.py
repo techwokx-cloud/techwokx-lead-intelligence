@@ -1,7 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
 import streamlit as st
-from dotenv import load_dotenv; load_dotenv()
-st.set_page_config(page_title="Bulk Research — TechWokx LIE", layout="wide")
-from modules.theme import THEME_CSS; st.markdown(THEME_CSS, unsafe_allow_html=True)
 from modules.company_research import research_company
 from modules.lead_scoring import score_from_research
 from modules.crm import save_research_to_crm
