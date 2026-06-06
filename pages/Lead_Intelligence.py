@@ -1,105 +1,104 @@
 import streamlit as st
+from dotenv import load_dotenv; load_dotenv()
+st.set_page_config(page_title="Intelligence — TechWokx LIE", layout="wide")
+from modules.theme import THEME_CSS; st.markdown(THEME_CSS, unsafe_allow_html=True)
 from modules.ai_analysis import generate_ai_analysis
 from modules.crm import get_all_companies, get_company, log_activity
 import os
 
-st.set_page_config(page_title="Lead Intelligence — TechWokx LIE", layout="wide")
-st.title("🤖 Lead Intelligence")
-st.caption("AI-powered analysis of company risks, opportunities, and recommended services.")
+st.markdown("# 🧠 Lead Intelligence")
+st.caption("AI-powered analysis — risks, opportunities and recommended actions.")
+st.markdown("---")
 
-# Check API keys
-has_claude = bool(os.getenv("ANTHROPIC_API_KEY"))
-has_openai = bool(os.getenv("OPENAI_API_KEY"))
-if not has_claude and not has_openai:
-    st.warning("⚠️ No AI API key found. Add keys in **Settings** for full AI analysis. Fallback analysis will be used.")
+has_ai = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY"))
+provider = "claude" if os.getenv("ANTHROPIC_API_KEY") else "openai"
 
-provider = "claude" if has_claude else "openai" if has_openai else "fallback"
+if not has_ai:
+    st.warning("⚠️ No AI API key set. Add keys in **Settings**. Fallback analysis will be used.")
 
-# ── Source selector ──
 tab1, tab2 = st.tabs(["From Last Research", "Select from CRM"])
 
 with tab1:
     if "last_research" in st.session_state:
         result = st.session_state["last_research"]
-        lead = st.session_state.get("last_lead_score")
-        st.info(f"Using research data for: **{result.company_name}**")
-        if st.button("🤖 Run AI Analysis", type="primary"):
-            with st.spinner("Generating AI analysis..."):
-                ai = generate_ai_analysis(result, result.dns_result, result.website_result, lead, provider=provider)
-            st.session_state["last_ai"] = ai
-            if "last_company_id" in st.session_state:
-                log_activity(st.session_state["last_company_id"], "AI Analysis", f"AI analysis generated. Urgency: {ai.get('urgency','—')}")
+        lead   = st.session_state.get("last_lead_score")
+        c1,c2  = st.columns([3,1])
+        with c1: st.info(f"Ready to analyse: **{result.company_name}**  |  Score: **{lead.total if lead else '—'}/100**")
+        with c2:
+            if st.button("🤖 Run Analysis", type="primary", use_container_width=True):
+                with st.spinner("Generating AI analysis..."):
+                    ai = generate_ai_analysis(result, result.dns_result, result.website_result, lead, provider=provider)
+                st.session_state["last_ai"] = ai
+                if "last_company_id" in st.session_state:
+                    log_activity(st.session_state["last_company_id"], "AI Analysis", f"Urgency: {ai.get('urgency','—')}")
     else:
-        st.info("Run a Company Research first to populate data here.")
+        st.markdown("""<div class="empty-state"><div class="empty-state-icon">🔍</div>
+            <div class="empty-state-title">No research loaded</div>
+            <div class="empty-state-sub">Run a Company Research first, then return here for AI analysis</div>
+        </div>""", unsafe_allow_html=True)
 
 with tab2:
     companies = get_all_companies()
     if companies:
-        options = {f"{c.company_name} ({c.lead_status or 'Cold'}) — Score: {c.lead_score or 0}": c.id for c in companies}
-        selected = st.selectbox("Select Company", list(options.keys()))
-        cid = options[selected]
-        if st.button("🤖 Analyse Selected Company", type="primary"):
-            company = get_company(cid)
-
-            class MockResearch:
-                company_name = company.company_name
-                website = company.website or ""
-                domain = company.website.replace("https://","").replace("http://","").replace("www.","").split("/")[0] if company.website else ""
-                phone = company.phone or ""
-                email = company.email or ""
-                address = company.address or ""
-                description = company.description or ""
-                confidence_score = company.confidence_score or 0
-                dns_result = None
-                website_result = None
-
-            class MockLead:
-                total = company.lead_score or 0
-                status = company.lead_status or "Cold"
-                rules = []
-
-            with st.spinner("Generating AI analysis..."):
-                ai = generate_ai_analysis(MockResearch(), None, None, MockLead(), provider=provider)
+        opts = {f"{c.company_name} — {c.lead_status or 'Cold'} — {int(c.lead_score or 0)}/100": c.id for c in companies}
+        sel = st.selectbox("Choose company", list(opts.keys()))
+        if st.button("🤖 Analyse", type="primary"):
+            co = get_company(opts[sel])
+            class R:
+                company_name=co.company_name; website=co.website or ""; domain=(co.website or "").replace("https://","").replace("http://","").replace("www.","").split("/")[0]
+                phone=co.phone or ""; email=co.email or ""; address=co.address or ""; description=co.description or ""; confidence_score=co.confidence_score or 0; dns_result=None; website_result=None
+            class L:
+                total=int(co.lead_score or 0); status=co.lead_status or "Cold"; rules=[]
+            with st.spinner("Generating..."):
+                ai = generate_ai_analysis(R(), None, None, L(), provider=provider)
             st.session_state["last_ai"] = ai
-            log_activity(cid, "AI Analysis", f"AI analysis generated.")
+            log_activity(opts[sel], "AI Analysis", "Generated from CRM")
     else:
-        st.info("No companies in CRM yet. Run Company Research first.")
+        st.caption("No companies in CRM yet.")
 
-# ── Display AI Results ──
-if "last_ai" in st.session_state:
-    ai = st.session_state["last_ai"]
-    st.markdown("---")
+# ── Results ──
+if "last_ai" not in st.session_state:
+    st.stop()
 
-    urgency = ai.get("urgency", "MEDIUM")
-    urgency_color = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟢"}.get(urgency, "🟡")
-    st.subheader(f"{urgency_color} Urgency: {urgency}")
+ai = st.session_state["last_ai"]
+st.markdown("---")
 
-    col1, col2 = st.columns(2)
+urgency = ai.get("urgency","MEDIUM")
+urg_color = {"HIGH":"#ef4444","MEDIUM":"#f97316","LOW":"#22c55e"}.get(urgency,"#f97316")
+st.markdown(f'<div style="background:rgba(0,0,0,0.2);border-left:4px solid {urg_color};padding:0.75rem 1rem;border-radius:0 8px 8px 0;margin-bottom:1.5rem"><span style="color:{urg_color};font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em">Urgency: {urgency}</span></div>', unsafe_allow_html=True)
 
-    with col1:
-        st.subheader("🏢 Company Summary")
-        st.write(ai.get("company_summary", "—"))
+c1,c2 = st.columns(2)
+with c1:
+    st.markdown('<div class="data-card"><h4>Company Summary</h4>', unsafe_allow_html=True)
+    st.write(ai.get("company_summary","—"))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        st.subheader("⚠️ Business Risks")
-        for r in ai.get("business_risks", []):
-            st.markdown(f"- 🔸 {r}")
+    st.markdown('<div class="data-card"><h4>Business Risks</h4>', unsafe_allow_html=True)
+    for r in ai.get("business_risks",[]):
+        st.markdown(f'<div class="profile-row"><span style="color:#f87171;margin-right:0.5rem">▸</span><span class="profile-value">{r}</span></div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        st.subheader("💻 Technology Risks")
-        for r in ai.get("technology_risks", []):
-            st.markdown(f"- 🔧 {r}")
+    st.markdown('<div class="data-card"><h4>Technology Risks</h4>', unsafe_allow_html=True)
+    for r in ai.get("technology_risks",[]):
+        st.markdown(f'<div class="profile-row"><span style="color:#fb923c;margin-right:0.5rem">▸</span><span class="profile-value">{r}</span></div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    with col2:
-        st.subheader("📧 Email Risks")
-        for r in ai.get("email_risks", []):
-            st.markdown(f"- 📩 {r}")
+with c2:
+    st.markdown('<div class="data-card"><h4>Email Security Risks</h4>', unsafe_allow_html=True)
+    for r in ai.get("email_risks",[]):
+        st.markdown(f'<div class="profile-row"><span style="color:#fbbf24;margin-right:0.5rem">▸</span><span class="profile-value">{r}</span></div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        st.subheader("✅ Recommended Services")
-        for s in ai.get("recommended_services", []):
-            st.markdown(f"- ✅ **{s}**")
+    st.markdown('<div class="data-card"><h4>Recommended Services</h4>', unsafe_allow_html=True)
+    for s in ai.get("recommended_services",[]):
+        st.markdown(f'<div class="profile-row"><span style="color:#4ade80;margin-right:0.5rem">✓</span><span class="profile-value" style="font-weight:600">{s}</span></div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        st.subheader("💰 Sales Opportunity")
-        st.info(ai.get("sales_opportunity", "—"))
+    st.markdown('<div class="data-card"><h4>Revenue Opportunity</h4>', unsafe_allow_html=True)
+    st.info(ai.get("sales_opportunity","—"))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    if st.button("📄 Generate Proposal from This Analysis", type="primary"):
-        st.session_state["ai_for_proposal"] = ai
-        st.switch_page("pages/Proposal_Generator.py")
+st.markdown("---")
+if st.button("📄 Generate Proposal from This Analysis", type="primary"):
+    st.session_state["ai_for_proposal"] = ai
+    st.switch_page("pages/Proposal_Generator.py")

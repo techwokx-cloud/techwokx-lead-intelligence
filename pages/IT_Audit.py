@@ -1,104 +1,90 @@
 import streamlit as st
+from dotenv import load_dotenv; load_dotenv()
+st.set_page_config(page_title="Audits — TechWokx LIE", layout="wide")
+from modules.theme import THEME_CSS; st.markdown(THEME_CSS, unsafe_allow_html=True)
 from modules.dns_audit import run_dns_audit
 from modules.website_verifier import verify_website
 from modules.lead_scoring import calculate_lead_score
 
-st.set_page_config(page_title="IT Audit — TechWokx LIE", layout="wide")
-st.title("🔐 IT Audit")
-st.caption("Run a standalone DNS, SSL and website audit on any domain.")
+st.markdown("# 🛡️ DNS & Email Security Audit")
+st.caption("Standalone audit tool — check any domain's DNS, email security, and SSL.")
+st.markdown("---")
 
-domain_input = st.text_input("Domain or URL", placeholder="e.g. example.com or https://example.com")
+c1,c2,c3 = st.columns([3,1,1])
+with c1: domain_input = st.text_input("Domain or URL", placeholder="e.g. example.com", label_visibility="collapsed")
+with c2: run_dns = st.checkbox("DNS Audit", value=True)
+with c3: run_web = st.checkbox("SSL Check", value=True)
+run = st.button("🚀 Run Audit", type="primary", use_container_width=True)
 
-col1, col2 = st.columns(2)
-with col1:
-    run_dns = st.checkbox("DNS & Email Security Audit", value=True)
-with col2:
-    run_web = st.checkbox("Website & SSL Audit", value=True)
-
-if st.button("🚀 Run Audit", type="primary", use_container_width=True) and domain_input:
-    domain = domain_input.lower().replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
-    url = f"https://www.{domain}"
-
+if run and domain_input:
+    domain = domain_input.lower().replace("https://","").replace("http://","").replace("www.","").split("/")[0]
     with st.spinner("Running audit..."):
-        dns_result = run_dns_audit(domain) if run_dns else None
-        web_result = verify_website(url) if run_web else None
-
-    st.session_state["audit_dns"] = dns_result
-    st.session_state["audit_web"] = web_result
-    st.session_state["audit_domain"] = domain
+        dns = run_dns_audit(domain) if run_dns else None
+        web = verify_website(f"https://www.{domain}") if run_web else None
+    st.session_state.update({"audit_dns":dns,"audit_web":web,"audit_domain":domain})
     st.success(f"Audit complete for **{domain}**")
 
-if "audit_dns" in st.session_state or "audit_web" in st.session_state:
-    dns = st.session_state.get("audit_dns")
-    web = st.session_state.get("audit_web")
-    domain = st.session_state.get("audit_domain", "")
+if "audit_dns" not in st.session_state:
+    st.markdown("""<div class="empty-state" style="margin-top:5rem">
+        <div class="empty-state-icon">🛡️</div>
+        <div class="empty-state-title">Enter a domain to audit</div>
+        <div class="empty-state-sub">DNS, email security, and SSL checks will run automatically</div>
+    </div>""", unsafe_allow_html=True)
+    st.stop()
 
-    st.markdown("---")
-    left, right = st.columns(2)
+dns = st.session_state.get("audit_dns")
+web = st.session_state.get("audit_web")
+domain = st.session_state.get("audit_domain","")
 
-    # ── Website & SSL ──
-    with left:
-        st.subheader("🌐 Website & SSL")
-        if web:
-            status_data = {
-                "Website Reachable": ("✅ Yes" if web.reachable else "❌ No", web.reachable),
-                "HTTPS Enabled":     ("✅ Yes" if web.https else "❌ No", web.https),
-                "SSL Valid":         ("✅ Yes" if (web.ssl and web.ssl.valid) else "❌ No", web.ssl and web.ssl.valid),
-                "Status Code":       (str(web.status_code), web.status_code == 200),
-            }
-            for label, (display, ok) in status_data.items():
-                col_l, col_r = st.columns([2, 1])
-                col_l.write(label)
-                col_r.write(display)
+# Scorecards
+st.markdown("<br>", unsafe_allow_html=True)
+s1,s2,s3 = st.columns(3)
+dns_score = dns.score if dns else 0
+ssl_score = 100 if (web and web.ssl and web.ssl.valid) else 0
+ls = calculate_lead_score(has_dmarc=dns.has_dmarc if dns else False, has_spf=dns.has_spf if dns else False,
+    has_mx=dns.has_mx if dns else False, has_dkim=dns.has_dkim if dns else False,
+    ssl_valid=web.ssl.valid if (web and web.ssl) else False, website_up=web.reachable if web else False) if dns or web else None
 
-            if web.ssl and web.ssl.valid:
-                st.info(f"🔒 SSL Issuer: **{web.ssl.issuer}**  |  Expires in: **{web.ssl.days_remaining} days**")
-                if web.ssl.days_remaining < 30:
-                    st.warning("⚠️ SSL expires in less than 30 days!")
-            elif web.ssl and not web.ssl.valid:
-                st.error(f"❌ SSL Error: {web.ssl.error}")
+for col,(title,score,color,grade) in zip([s1,s2,s3],[
+    ("Email Security Score", dns_score, "#22c55e" if dns_score>=75 else "#f97316" if dns_score>=50 else "#ef4444", dns.grade if dns else "—"),
+    ("Website Security Score", ssl_score, "#22c55e" if ssl_score else "#ef4444", "A" if ssl_score else "F"),
+    ("Lead Opportunity Score", ls.total if ls else 0, "#ef4444" if (ls and ls.total>=90) else "#f97316" if (ls and ls.total>=70) else "#22c55e", ls.status if ls else "—"),
+]):
+    with col:
+        st.markdown(f'<div class="scorecard"><div class="scorecard-title">{title}</div><div class="scorecard-score" style="color:{color}">{score}</div><div class="scorecard-grade">Grade: {grade}</div></div>', unsafe_allow_html=True)
 
-            if web.title:
-                st.info(f"📄 Page Title: {web.title}")
-            if web.error:
-                st.error(f"Error: {web.error}")
-        else:
-            st.info("Website audit not selected")
+st.markdown("<br>", unsafe_allow_html=True)
+left,right = st.columns(2)
 
-    # ── DNS Audit ──
-    with right:
-        st.subheader("📧 Email Security")
-        if dns:
-            grade_map = {"A": "🟢", "B": "🟡", "C": "🟠", "D": "🔴", "F": "🔴"}
-            st.metric("Email Security Score", f"{dns.score}/100", delta=f"Grade {dns.grade}")
-            st.progress(dns.score / 100)
-            st.caption(f"Email Provider Detected: **{dns.email_provider}**")
+with left:
+    st.markdown("### 📧 Email Security Findings")
+    if dns:
+        st.caption(f"Domain: **{domain}**  |  Email Provider: **{dns.email_provider}**")
+        st.progress(dns.score/100)
+        for f in dns.findings:
+            if f.status=="PASS": st.success(f"✅ **{f.check}** — {f.detail}")
+            elif f.status=="FAIL": st.error(f"❌ **{f.check}** — {f.detail}")
+            else: st.warning(f"⚠️ **{f.check}** — {f.detail}")
 
-            for f in dns.findings:
-                if f.status == "PASS":
-                    st.success(f"✅ {f.check}: {f.detail}")
-                elif f.status == "FAIL":
-                    st.error(f"❌ {f.check}: {f.detail}")
-                else:
-                    st.warning(f"⚠️ {f.check}: {f.detail}")
-        else:
-            st.info("DNS audit not selected")
+with right:
+    st.markdown("### 🌐 Website & SSL")
+    if web:
+        items = [("Reachable","✅ Yes" if web.reachable else "❌ No"),("HTTPS","✅ Yes" if web.https else "❌ No"),
+                 ("SSL Valid","✅ Yes" if (web.ssl and web.ssl.valid) else "❌ No"),
+                 ("Status Code",str(web.status_code) if web.status_code else "—"),
+                 ("Response",f"{web.response_time_ms}ms" if web.response_time_ms else "—"),
+                 ("Page Title",(web.title or "—")[:60])]
+        for l,v in items:
+            st.markdown(f'<div class="profile-row"><span class="profile-label">{l}</span><span class="profile-value">{v}</span></div>', unsafe_allow_html=True)
+        if web.ssl and web.ssl.valid:
+            st.info(f"🔒 Issued by: **{web.ssl.issuer}**  |  Expires in: **{web.ssl.days_remaining} days**")
+            if web.ssl.days_remaining < 30: st.warning("⚠️ SSL expires in less than 30 days!")
+        elif web.ssl and web.ssl.error:
+            st.error(f"SSL Error: {web.ssl.error}")
 
-    # ── Lead Score from audit ──
-    st.markdown("---")
-    st.subheader("🎯 Opportunity Score")
-    if dns and web:
-        ls = calculate_lead_score(
-            has_dmarc=dns.has_dmarc, has_spf=dns.has_spf, has_mx=dns.has_mx, has_dkim=dns.has_dkim,
-            ssl_valid=web.ssl.valid if web.ssl else False,
-            website_up=web.reachable
-        )
-        score_emoji = "🔴" if ls.total >= 90 else "🟠" if ls.total >= 70 else "🟢"
-        st.metric(f"{score_emoji} Lead Score", f"{ls.total}/100 — {ls.status}")
-        st.progress(ls.total / 100)
+    if ls:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("### 🎯 Opportunity Breakdown")
+        for r in [r for r in ls.rules if r.triggered]:
+            st.markdown(f'<div class="profile-row"><span class="profile-label" style="color:#fb923c">+{r.points}</span><span class="profile-value">{r.reason}</span></div>', unsafe_allow_html=True)
         st.caption(ls.opportunity_summary)
-        triggered = [r for r in ls.rules if r.triggered]
-        if triggered:
-            with st.expander("View scoring breakdown"):
-                for r in triggered:
-                    st.markdown(f"- 🔸 **+{r.points}** — {r.reason}")

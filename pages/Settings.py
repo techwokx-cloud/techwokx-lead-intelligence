@@ -1,99 +1,77 @@
 import streamlit as st
+from dotenv import load_dotenv; load_dotenv()
+st.set_page_config(page_title="Settings — TechWokx LIE", layout="wide")
+from modules.theme import THEME_CSS; st.markdown(THEME_CSS, unsafe_allow_html=True)
 import os
 from pathlib import Path
-from dotenv import load_dotenv, set_key
+from dotenv import set_key
+from modules.database import DB_PATH, engine
+from modules.crm import get_dashboard_stats
 
 load_dotenv()
 ENV_FILE = Path(".env")
 
-st.set_page_config(page_title="Settings — TechWokx LIE", layout="wide")
-st.title("⚙️ Settings")
-st.caption("Configure API keys and application settings. Keys are saved to your .env file.")
-
-# ── API Keys ──
-st.subheader("🔑 API Keys")
-
-def show_key_status(env_var: str) -> str:
-    val = os.getenv(env_var, "")
-    if val and len(val) > 8:
-        return f"✅ Set ({val[:6]}...{val[-4:]})"
-    return "❌ Not set"
-
-with st.form("api_keys_form"):
-    col1, col2 = st.columns(2)
-    with col1:
-        st.caption(f"Claude API Key: {show_key_status('ANTHROPIC_API_KEY')}")
-        claude_key = st.text_input("Anthropic (Claude) API Key", type="password", placeholder="sk-ant-...")
-
-        st.caption(f"OpenAI API Key: {show_key_status('OPENAI_API_KEY')}")
-        openai_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
-
-    with col2:
-        st.caption(f"Google Maps Key: {show_key_status('GOOGLE_MAPS_API_KEY')}")
-        gmaps_key = st.text_input("Google Maps API Key", type="password", placeholder="AIza...")
-
-        st.caption(f"SerpAPI Key: {show_key_status('SERP_API_KEY')}")
-        serp_key = st.text_input("SerpAPI Key", type="password", placeholder="...")
-
-    submitted = st.form_submit_button("💾 Save API Keys", type="primary", use_container_width=True)
-
-if submitted:
-    if not ENV_FILE.exists():
-        ENV_FILE.write_text("")
-    if claude_key:
-        set_key(str(ENV_FILE), "ANTHROPIC_API_KEY", claude_key)
-        os.environ["ANTHROPIC_API_KEY"] = claude_key
-    if openai_key:
-        set_key(str(ENV_FILE), "OPENAI_API_KEY", openai_key)
-        os.environ["OPENAI_API_KEY"] = openai_key
-    if gmaps_key:
-        set_key(str(ENV_FILE), "GOOGLE_MAPS_API_KEY", gmaps_key)
-        os.environ["GOOGLE_MAPS_API_KEY"] = gmaps_key
-    if serp_key:
-        set_key(str(ENV_FILE), "SERP_API_KEY", serp_key)
-        os.environ["SERP_API_KEY"] = serp_key
-    st.success("✅ API keys saved to .env file")
-
+st.markdown("# ⚙️ Settings")
+st.caption("Configure API keys and application preferences.")
 st.markdown("---")
 
-# ── Database Info ──
-st.subheader("🗄️ Database")
-from modules.database import DB_PATH, engine
-from modules.crm import get_dashboard_stats
-stats = get_dashboard_stats()
+def key_status(env_var):
+    v = os.getenv(env_var,"")
+    return f"✅ {v[:6]}...{v[-4:]}" if v and len(v)>10 else "❌ Not set"
 
-col_a, col_b, col_c = st.columns(3)
-col_a.metric("Total Companies", stats["total"])
-col_b.metric("Hot Leads", stats["hot"])
-col_c.metric("Database Path", DB_PATH)
+# ── API Keys ──
+st.markdown("### 🔑 API Keys")
+with st.form("keys"):
+    c1,c2 = st.columns(2)
+    with c1:
+        st.caption(f"Claude (Anthropic): {key_status('ANTHROPIC_API_KEY')}")
+        ck = st.text_input("Anthropic API Key", type="password", placeholder="sk-ant-...")
+        st.caption(f"OpenAI: {key_status('OPENAI_API_KEY')}")
+        ok = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
+    with c2:
+        st.caption(f"Google Maps: {key_status('GOOGLE_MAPS_API_KEY')}")
+        gk = st.text_input("Google Maps API Key", type="password", placeholder="AIza...")
+        st.caption(f"SerpAPI: {key_status('SERP_API_KEY')}")
+        sk = st.text_input("SerpAPI Key", type="password", placeholder="...")
+    save = st.form_submit_button("💾 Save Keys", type="primary", use_container_width=True)
+
+if save:
+    if not ENV_FILE.exists(): ENV_FILE.write_text("")
+    for key,val in [("ANTHROPIC_API_KEY",ck),("OPENAI_API_KEY",ok),("GOOGLE_MAPS_API_KEY",gk),("SERP_API_KEY",sk)]:
+        if val: set_key(str(ENV_FILE),key,val); os.environ[key]=val
+    st.success("✅ Keys saved")
+
+st.markdown("---")
+st.markdown("### 🗄️ Database")
+stats = get_dashboard_stats()
+m1,m2,m3,m4 = st.columns(4)
+m1.metric("Total Leads", stats["total"])
+m2.metric("Hot Leads",   stats["hot"])
+m3.metric("Won Deals",   stats["won"])
+m4.metric("DB Path",     DB_PATH)
 
 if st.button("🗑️ Clear All Data", type="secondary"):
-    confirm = st.checkbox("I confirm I want to delete all leads data")
+    confirm = st.checkbox("Confirm — this deletes all leads and cannot be undone")
     if confirm:
         from modules.database import Base
-        Base.metadata.drop_all(engine)
-        Base.metadata.create_all(engine)
+        Base.metadata.drop_all(engine); Base.metadata.create_all(engine)
         st.success("Database cleared")
 
 st.markdown("---")
-
-# ── About ──
-st.subheader("ℹ️ About")
+st.markdown("### ℹ️ About")
 st.markdown("""
-**TechWokx Lead Intelligence Engine v2**
-
-Built by: George Jabley | TechWokx IT Solutions
-
 | Module | Status |
 |---|---|
-| Company Research | ✅ Active |
-| DNS & Email Audit | ✅ Active |
-| Website & SSL Audit | ✅ Active |
-| AI Analysis (Claude) | ✅ Active with API key |
-| AI Analysis (OpenAI) | ✅ Active with API key |
-| PDF Proposal Generator | ✅ Active |
-| CRM Pipeline | ✅ Active |
-| Bulk Research | 🔜 Coming soon |
+| Company Research (DuckDuckGo + Crawler) | ✅ |
+| DNS & Email Audit (MX/SPF/DKIM/DMARC/BIMI) | ✅ |
+| Website & SSL Audit | ✅ |
+| Technology Detector | ✅ |
+| Lead Scoring (Rule-based) | ✅ |
+| AI Analysis (Claude / OpenAI) | ✅ with key |
+| Proposal Generator (Email/WhatsApp/PDF) | ✅ |
+| CRM Pipeline (Kanban + Table) | ✅ |
+| Bulk Research (CSV Upload) | 🔜 |
+| Google Maps Integration | 🔜 |
 
-**hello@techwokx.online | techwokx.online**
+**TechWokx IT Solutions** | hello@techwokx.online | techwokx.online
 """)
