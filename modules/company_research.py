@@ -1,6 +1,10 @@
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from dotenv import load_dotenv
 load_dotenv()
 import streamlit as st
+from modules.theme import THEME_CSS
+st.markdown(THEME_CSS, unsafe_allow_html=True)
 
 
 from modules.company_research import research_company
