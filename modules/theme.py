@@ -156,4 +156,33 @@ THEME_CSS = """
     }
     
     /* Button styling */
-    .
+    .stButton > button {
+        background: linear-gradient(135deg, #fbbf24, #f59e0b);
+        color: #0f172a;
+        font-weight: 600;
+        border: none;
+    }
+    
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: white;
+    }
+    
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2rem;
+        background: rgba(30, 41, 59, 0.5);
+        padding: 0.5rem;
+        border-radius: 12px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        color: #94a3b8;
+        font-weight: 500;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        color: #fbbf24;
+        border-bottom-color: #fbbf24;
+    }
+</style>
