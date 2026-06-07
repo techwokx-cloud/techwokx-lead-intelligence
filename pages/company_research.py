@@ -6,6 +6,7 @@ from typing import List, Optional
 from modules.website_verifier import verify_website
 from modules.website_crawler import crawl_website
 from modules.dns_audit import run_dns_audit
+from modules.research_engine import research_company
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; TechWokxBot/1.0)"}
 TIMEOUT = 8
