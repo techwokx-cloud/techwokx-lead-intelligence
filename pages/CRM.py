@@ -1,131 +1,277 @@
-import sys, os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# pages/CRM.py
+import sys
+import os
+
+# Add parent directory to path FIRST
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import Streamlit FIRST
+import streamlit as st
+
+# Set page config (must be first Streamlit command)
+st.set_page_config(
+    page_title="CRM - Lead Management",
+    page_icon="👥",
+    layout="wide"
+)
+
+# Now import other modules
 from dotenv import load_dotenv
 load_dotenv()
-import streamlit as st
-from modules.theme import THEME_CSS
-st.markdown(THEME_CSS, unsafe_allow_html=True)
-import pandas as pd
-from modules.crm import get_all_companies, get_company, update_stage, log_activity, CRM_STAGES
-from modules.database import get_session, Company, Activity, Contact
-from datetime import datetime, date
-from sqlalchemy import desc
 
-st.markdown("# 👥 CRM Pipeline")
-st.caption("Manage your leads from first contact to closed deal.")
-st.markdown("---")
+# Try to import theme safely
+try:
+    from modules.theme import THEME_CSS
+    st.markdown(THEME_CSS, unsafe_allow_html=True)
+except Exception:
+    pass  # Theme is optional
 
-# Filters
-f1,f2,f3,f4 = st.columns([2,1,1,1])
-with f1: search = st.text_input("", placeholder="🔍 Search company...", label_visibility="collapsed")
-with f2: f_stage = st.selectbox("Stage", ["All"]+CRM_STAGES, label_visibility="collapsed")
-with f3: f_status = st.selectbox("Status", ["All","Hot","Warm","Cold"], label_visibility="collapsed")
-with f4: view = st.radio("", ["Cards","Table"], horizontal=True, label_visibility="collapsed")
-
-companies = get_all_companies(stage=None if f_stage=="All" else f_stage, status=None if f_status=="All" else f_status)
-if search: companies = [c for c in companies if search.lower() in (c.company_name or "").lower()]
-
-st.markdown("---")
-
-if view == "Cards":
-    # Kanban with 5 stages
-    kanban_stages = CRM_STAGES[:5]
-    stage_colors = {"New":"#6366f1","Researching":"#3b82f6","Contacted":"#f59e0b","Proposal Sent":"#f97316","Follow-up":"#ea580c"}
-    cols = st.columns(5)
-    for col, stage in zip(cols, kanban_stages):
-        stage_cos = [c for c in companies if c.crm_stage == stage]
-        color = stage_colors.get(stage,"#475569")
-        with col:
-            st.markdown(f"""<div class="kanban-col">
-                <div class="kanban-header">
-                    <span style="color:{color};font-weight:700">{stage}</span>
-                    <span style="background:rgba(255,255,255,0.06);padding:1px 8px;border-radius:10px">{len(stage_cos)}</span>
-                </div>""", unsafe_allow_html=True)
-            for c in stage_cos[:5]:
-                badge_cls = "badge-hot" if c.lead_status=="Hot" else "badge-warm" if c.lead_status=="Warm" else "badge-cold"
-                ssl_icon = "🔒" if c.ssl_valid else "🔓"
-                st.markdown(f"""<div class="kanban-card">
-                    <div class="kanban-card-name">{(c.company_name or "")[:22]}</div>
-                    <div class="kanban-card-meta" style="margin-top:0.3rem">
-                        <span class="badge {badge_cls}">{c.lead_status or "Cold"}</span>&nbsp;
-                        <span style="color:#334155;font-size:0.7rem">{ssl_icon} {int(c.lead_score or 0)}/100</span>
-                    </div>
-                </div>""", unsafe_allow_html=True)
-            if len(stage_cos) > 5:
-                st.markdown(f'<div style="font-size:0.72rem;color:#334155;text-align:center;padding:0.4rem">+{len(stage_cos)-5} more</div>', unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    # Won / Lost row
-    st.markdown("<br>", unsafe_allow_html=True)
-    wl1,wl2 = st.columns(2)
-    for col,stage,color in [(wl1,"Won","#22c55e"),(wl2,"Lost","#ef4444")]:
-        stage_cos = [c for c in get_all_companies(stage=stage)]
-        with col:
-            st.markdown(f"""<div class="kanban-col" style="border-color:rgba({('34,197,94' if stage=='Won' else '239,68,68')},0.2)">
-                <div class="kanban-header"><span style="color:{color}">{stage}</span>
-                <span style="background:rgba(255,255,255,0.06);padding:1px 8px;border-radius:10px">{len(stage_cos)}</span></div>""", unsafe_allow_html=True)
-            for c in stage_cos[:3]:
-                st.markdown(f'<div class="kanban-card"><div class="kanban-card-name">{(c.company_name or "")[:22]}</div></div>', unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-else:  # Table
-    if companies:
-        rows = [{"Company":c.company_name,"Status":f"{'🔴' if c.lead_status=='Hot' else '🟠' if c.lead_status=='Warm' else '🟢'} {c.lead_status or 'Cold'}","Score":int(c.lead_score or 0),"Stage":c.crm_stage or "New","Email":c.email or "—","Phone":c.phone or "—","DNS":int(c.dns_score or 0),"SSL":"✅" if c.ssl_valid else "❌","Website":"✅" if c.website_up else "❌","Added":c.created_at.strftime("%d %b %Y") if c.created_at else "—"} for c in companies]
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        csv = df.to_csv(index=False)
-        st.download_button("⬇️ Export CSV", csv, file_name=f"leads_{datetime.now().strftime('%Y%m%d')}.csv")
-    else:
-        st.markdown('<div class="empty-state"><div class="empty-state-icon">👥</div><div class="empty-state-title">No leads yet</div><div class="empty-state-sub">Research companies to populate your pipeline</div></div>', unsafe_allow_html=True)
-
-# ── Company Detail Panel ──
-st.markdown("---")
-st.markdown("### 📋 Company Detail")
-if not companies:
+# Import database modules with error handling
+try:
+    from modules.database import get_session, CRMCompany, CRMActivity
+    import pandas as pd
+    from datetime import datetime
+    DB_AVAILABLE = True
+except ImportError as e:
+    DB_AVAILABLE = False
+    st.error(f"⚠️ Database module not available: {e}")
     st.stop()
 
-opts = {c.company_name: c.id for c in companies}
-sel = st.selectbox("Select company", list(opts.keys()), label_visibility="collapsed")
-selected = get_company(opts[sel])
+st.markdown("# 👥 CRM Dashboard")
+st.caption("Manage and track your leads")
+st.markdown("---")
 
-if selected:
-    d1,d2,d3 = st.columns([1.5,1,1])
-    with d1:
-        st.markdown('<div class="data-card">', unsafe_allow_html=True)
-        for l,v in [("Company",selected.company_name),("Website",selected.website or "—"),("Phone",selected.phone or "—"),("Email",selected.email or "—"),("Address",selected.address or "—"),("Provider",selected.email_provider or "—"),("Lead Score",f"{int(selected.lead_score or 0)}/100 ({selected.lead_status or 'Cold'})"),("DNS Score",f"{int(selected.dns_score or 0)}/100"),("SSL","✅ Valid" if selected.ssl_valid else "❌ Invalid"),("Website Up","✅ Yes" if selected.website_up else "❌ No")]:
-            st.markdown(f'<div class="profile-row"><span class="profile-label">{l}</span><span class="profile-value">{v}</span></div>', unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-    with d2:
-        st.markdown("**Update Stage**")
-        new_stage = st.selectbox("", CRM_STAGES, index=CRM_STAGES.index(selected.crm_stage) if selected.crm_stage in CRM_STAGES else 0, label_visibility="collapsed")
-        if st.button("✅ Update Stage", use_container_width=True):
-            update_stage(selected.id, new_stage)
-            log_activity(selected.id,"Stage Change",f"Moved to {new_stage}")
-            st.success(f"Moved to {new_stage}"); st.rerun()
-        st.markdown("**Add Note**")
-        note = st.text_area("", placeholder="Type note...", height=100, label_visibility="collapsed")
-        if st.button("💾 Save Note", use_container_width=True) and note:
-            log_activity(selected.id,"Note",note); st.success("Saved")
-    with d3:
-        st.markdown("**Follow-up Date**")
-        fu = st.date_input("", value=date.today(), label_visibility="collapsed")
-        if st.button("📅 Set Follow-up", use_container_width=True):
-            db = get_session()
-            c2 = db.query(Company).filter(Company.id==selected.id).first()
-            if c2: c2.follow_up_date = datetime.combine(fu,datetime.min.time()); db.commit()
-            db.close(); st.success(f"Follow-up: {fu}")
-        if selected.ai_summary:
-            st.markdown("**AI Summary**")
-            st.caption(selected.ai_summary[:200])
+# Initialize session state
+if 'selected_company_id' not in st.session_state:
+    st.session_state.selected_company_id = None
+if 'refresh_crm' not in st.session_state:
+    st.session_state.refresh_crm = False
 
-    # Activity log
-    st.markdown("**Activity Log**")
+# Refresh button
+col1, col2, col3 = st.columns([2, 1, 1])
+with col1:
+    st.markdown("### Lead Database")
+with col2:
+    if st.button("🔄 Refresh", use_container_width=True):
+        st.session_state.refresh_crm = True
+        st.rerun()
+with col3:
+    if st.button("➕ Add Manual Entry", use_container_width=True):
+        st.session_state.show_add_form = True
+
+# Fetch companies from database
+try:
     db = get_session()
-    acts = db.query(Activity).filter(Activity.company_id==selected.id).order_by(desc(Activity.created_at)).limit(10).all()
+    companies = db.query(CRMCompany).order_by(CRMCompany.lead_score.desc()).all()
     db.close()
-    if acts:
-        for a in acts:
-            ts = a.created_at.strftime("%d %b %Y %H:%M") if a.created_at else "—"
-            st.markdown(f'<div class="activity-item"><div class="activity-dot"></div><div><div class="activity-text"><strong>{a.activity_type}</strong> — {(a.description or "")[:60]}</div><div class="activity-time">{ts}</div></div></div>', unsafe_allow_html=True)
-    else:
-        st.caption("No activity yet")
+except Exception as e:
+    st.error(f"Error fetching companies: {e}")
+    companies = []
+
+if companies:
+    # Convert to DataFrame for display
+    data = []
+    for c in companies:
+        data.append({
+            "ID": c.id,
+            "Company": c.name,
+            "Domain": c.domain,
+            "Lead Score": c.lead_score or 0,
+            "Status": c.lead_status or "New",
+            "Phone": c.phone or "N/A",
+            "Email": c.email or "N/A",
+            "Last Research": c.last_research.strftime("%Y-%m-%d") if c.last_research else "Never",
+            "Created": c.created_at.strftime("%Y-%m-%d") if c.created_at else "Unknown"
+        })
+    
+    df = pd.DataFrame(data)
+    
+    # Filters
+    st.markdown("### Filters")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        status_filter = st.multiselect("Status", options=df["Status"].unique() if not df.empty else [])
+    with col2:
+        min_score = st.slider("Min Lead Score", 0, 100, 0)
+    with col3:
+        sort_by = st.selectbox("Sort By", ["Lead Score", "Company", "Last Research", "Created"])
+    with col4:
+        sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True)
+    
+    # Apply filters
+    filtered_df = df.copy()
+    if status_filter:
+        filtered_df = filtered_df[filtered_df["Status"].isin(status_filter)]
+    if min_score > 0:
+        filtered_df = filtered_df[filtered_df["Lead Score"] >= min_score]
+    
+    # Apply sorting
+    if sort_by == "Lead Score":
+        filtered_df = filtered_df.sort_values("Lead Score", ascending=(sort_order == "Ascending"))
+    elif sort_by == "Company":
+        filtered_df = filtered_df.sort_values("Company", ascending=(sort_order == "Ascending"))
+    elif sort_by == "Last Research":
+        filtered_df = filtered_df.sort_values("Last Research", ascending=(sort_order == "Ascending"))
+    elif sort_by == "Created":
+        filtered_df = filtered_df.sort_values("Created", ascending=(sort_order == "Ascending"))
+    
+    # Display statistics
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Total Leads", len(filtered_df))
+    with col2:
+        hot = len(filtered_df[filtered_df["Lead Score"] >= 70])
+        st.metric("Hot Leads (70+)", hot)
+    with col3:
+        warm = len(filtered_df[(filtered_df["Lead Score"] >= 50) & (filtered_df["Lead Score"] < 70)])
+        st.metric("Warm Leads (50-69)", warm)
+    with col4:
+        cold = len(filtered_df[filtered_df["Lead Score"] < 50])
+        st.metric("Cold Leads (<50)", cold)
+    with col5:
+        avg_score = filtered_df["Lead Score"].mean() if not filtered_df.empty else 0
+        st.metric("Avg Lead Score", f"{avg_score:.0f}")
+    
+    st.markdown("---")
+    
+    # Display data table
+    st.markdown("### Lead Database")
+    st.dataframe(filtered_df, use_container_width=True, height=400)
+    
+    # Company details section
+    st.markdown("---")
+    st.markdown("### Company Details")
+    
+    # Select company for detailed view
+    company_names = filtered_df["Company"].tolist() if not filtered_df.empty else []
+    selected_company_name = st.selectbox("Select a company to view details", company_names)
+    
+    if selected_company_name:
+        # Get company details
+        db = get_session()
+        company = db.query(CRMCompany).filter_by(name=selected_company_name).first()
+        
+        if company:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### Company Information")
+                st.write(f"**Name:** {company.name}")
+                st.write(f"**Domain:** {company.domain}")
+                st.write(f"**Website:** {company.website or 'N/A'}")
+                st.write(f"**Lead Score:** {company.lead_score}/100")
+                st.write(f"**Status:** {company.lead_status}")
+                
+                if company.lead_score >= 70:
+                    st.success("🎯 **High Priority Lead** - Ready for outreach")
+                elif company.lead_score >= 50:
+                    st.warning("📌 **Medium Priority Lead** - Nurture needed")
+                else:
+                    st.info("📋 **Low Priority Lead** - More research required")
+            
+            with col2:
+                st.markdown("#### Contact Information")
+                st.write(f"**Phone:** {company.phone or 'Not found'}")
+                st.write(f"**Email:** {company.email or 'Not found'}")
+                st.write(f"**Address:** {company.address or 'Not provided'}")
+            
+            # Quick actions
+            st.markdown("#### Quick Actions")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                if st.button("📞 Call", use_container_width=True):
+                    st.info(f"Call {company.phone}" if company.phone else "No phone number available")
+            
+            with col2:
+                if st.button("✉️ Email", use_container_width=True):
+                    st.info(f"Email {company.email}" if company.email else "No email available")
+            
+            with col3:
+                if st.button("📄 Proposal", use_container_width=True):
+                    st.session_state.last_company_id = company.id
+                    st.switch_page("pages/Proposal_Generator.py")
+            
+            with col4:
+                if st.button("🗑️ Delete", use_container_width=True):
+                    if st.session_state.get('confirm_delete'):
+                        try:
+                            db = get_session()
+                            db.delete(company)
+                            db.commit()
+                            db.close()
+                            st.success(f"Deleted {company.name}")
+                            st.session_state.refresh_crm = True
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error deleting: {e}")
+                    else:
+                        st.session_state.confirm_delete = True
+                        st.warning("Click again to confirm delete")
+            
+            # Activity log
+            st.markdown("#### Recent Activity")
+            try:
+                db = get_session()
+                activities = db.query(CRMActivity).filter_by(company_id=company.id).order_by(CRMActivity.created_at.desc()).limit(10).all()
+                db.close()
+                
+                if activities:
+                    for act in activities:
+                        st.caption(f"📝 {act.created_at.strftime('%Y-%m-%d %H:%M')} - {act.activity_type}: {act.description}")
+                else:
+                    st.caption("No recent activities")
+            except Exception as e:
+                st.caption(f"Activity log unavailable: {e}")
+            
+            # Add activity
+            st.markdown("#### Add Activity")
+            activity_type = st.selectbox("Activity Type", ["Call", "Email", "Meeting", "Note", "Follow-up"])
+            activity_desc = st.text_input("Description")
+            if st.button("➕ Add Activity", use_container_width=True):
+                if activity_desc:
+                    try:
+                        db = get_session()
+                        activity = CRMActivity(
+                            company_id=company.id,
+                            activity_type=activity_type,
+                            description=activity_desc,
+                            created_at=datetime.utcnow()
+                        )
+                        db.add(activity)
+                        db.commit()
+                        db.close()
+                        st.success("Activity added!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error adding activity: {e}")
+                else:
+                    st.warning("Please enter a description")
+        
+        db.close()
+
+else:
+    # Empty state
+    st.info("📭 No companies in CRM yet. Research some companies to get started!")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔍 Go to Company Research", use_container_width=True):
+            st.switch_page("pages/company_research.py")
+    with col2:
+        if st.button("📊 Try Bulk Research", use_container_width=True):
+            st.switch_page("pages/Bulk_Research.py")
+    
+    st.markdown("---")
+    st.markdown("### Sample Companies to Research")
+    st.markdown("""
+    - Nyaho Medical Centre
+    - MTN Ghana
+    - GCB Bank
+    - Kasapreko Company Limited
+    """)
+
+# Footer
+st.markdown("---")
+st.caption(f"TechWokx CRM • Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
