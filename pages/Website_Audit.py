@@ -1,10 +1,10 @@
-import sys, os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from dotenv import load_dotenv
-load_dotenv()
-import streamlit as st
-from modules.theme import THEME_CSS
-st.markdown(THEME_CSS, unsafe_allow_html=True)
+# NEW (safe)
+try:
+    from modules.theme import THEME_CSS
+    st.markdown(THEME_CSS, unsafe_allow_html=True)
+except Exception:
+    # Fallback - no theme styling
+    pass
 from modules.website_verifier import verify_website
 from modules.technology_detector import detect_technologies
 
