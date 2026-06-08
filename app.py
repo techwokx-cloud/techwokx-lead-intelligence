@@ -3,10 +3,7 @@ import pandas as pd
 import os
 import socket
 import platform
-import psutil
-import shutil
 from datetime import datetime
-from pathlib import Path
 
 # Page config
 st.set_page_config(
@@ -26,8 +23,6 @@ if 'leads' not in st.session_state:
     st.session_state.leads = []
 if 'email_log' not in st.session_state:
     st.session_state.email_log = []
-if 'notification_log' not in st.session_state:
-    st.session_state.notification_log = []
 
 # Login credentials
 USERS = {
@@ -110,26 +105,36 @@ def get_system_info():
     info = {
         "hostname": socket.gethostname(),
         "platform": platform.system(),
+        "platform_version": platform.version(),
         "processor": platform.processor(),
-        "cpu_count": psutil.cpu_count(),
-        "cpu_percent": psutil.cpu_percent(interval=1),
-        "memory_total": psutil.virtual_memory().total / (1024**3),
-        "memory_available": psutil.virtual_memory().available / (1024**3),
-        "memory_percent": psutil.virtual_memory().percent,
     }
     return info
+
+def get_folder_size(path):
+    total_size = 0
+    try:
+        for entry in os.listdir(path):
+            entry_path = os.path.join(path, entry)
+            if os.path.isfile(entry_path):
+                total_size += os.path.getsize(entry_path)
+            elif os.path.isdir(entry_path):
+                total_size += get_folder_size(entry_path)
+    except:
+        pass
+    return total_size
 
 def analyze_folders(path):
     folders = []
     try:
-        for item in Path(path).iterdir():
-            if item.is_dir():
+        for item in os.listdir(path):
+            item_path = os.path.join(path, item)
+            if os.path.isdir(item_path):
                 try:
-                    size = sum(f.stat().st_size for f in item.rglob('*') if f.is_file())
+                    size = get_folder_size(item_path)
                     folders.append({
-                        "name": item.name,
+                        "name": item,
                         "size_gb": size / (1024**3),
-                        "item_count": len(list(item.rglob('*')))
+                        "size_mb": size / (1024**2)
                     })
                 except:
                     pass
@@ -137,16 +142,35 @@ def analyze_folders(path):
         pass
     return sorted(folders, key=lambda x: x['size_gb'], reverse=True)[:20]
 
-def create_backup(source_path, backup_name=None):
-    if not backup_name:
-        backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    backup_path = f"/tmp/{backup_name}.zip"
+def check_dns(domain):
+    import socket
+    results = {}
     try:
-        shutil.make_archive(f"/tmp/{backup_name}", 'zip', source_path)
-        size = os.path.getsize(backup_path) / (1024**2)
-        return {"success": True, "path": backup_path, "size_mb": size, "name": backup_name}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        socket.gethostbyname(domain)
+        results['a_record'] = True
+    except:
+        results['a_record'] = False
+    
+    try:
+        socket.gethostbyname(f"mail.{domain}")
+        results['mx_record'] = True
+    except:
+        results['mx_record'] = False
+    
+    return results
+
+def check_website(url):
+    import requests
+    results = {}
+    try:
+        response = requests.get(url, timeout=5, verify=True)
+        results['reachable'] = response.status_code == 200
+        results['https'] = url.startswith('https')
+        results['status_code'] = response.status_code
+    except:
+        results['reachable'] = False
+        results['https'] = url.startswith('https')
+    return results
 
 # CSS
 st.markdown("""
@@ -164,6 +188,7 @@ st.markdown("""
 .section-header { color: #0f172a; font-size: 1.2rem; font-weight: 600; margin: 1.5rem 0 1rem 0; border-left: 3px solid #fbbf24; padding-left: 1rem; }
 .custom-divider { height: 1px; background: #e2e8f0; margin: 1.5rem 0; }
 .stButton > button { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #0f172a !important; font-weight: 600; border: none; border-radius: 8px; }
+.stButton > button:hover { background: linear-gradient(135deg, #f59e0b, #d97706); color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -203,7 +228,6 @@ with st.sidebar:
         ("---", "divider1"),
         ("💻 System Info", "system_info"),
         ("📁 Folder Analyzer", "folder_analyzer"),
-        ("💾 Backup Manager", "backup_manager"),
         ("---", "divider2"),
         ("🌐 DNS Audit", "dns_audit"),
         ("🔒 Website Audit", "website_audit"),
@@ -249,13 +273,19 @@ if st.session_state.page == 'dashboard':
     col1, col2 = st.columns(2)
     with col1:
         st.markdown('<div class="section-header">📊 Recent Leads</div>', unsafe_allow_html=True)
-        for lead in st.session_state.leads[-5:]:
-            st.markdown(f'<div class="data-card"><strong>{lead["name"]}</strong> - Score: {lead["score"]}/100<br><small>{lead["created_at"].strftime("%Y-%m-%d") if lead.get("created_at") else "Just now"}</small></div>', unsafe_allow_html=True)
+        if st.session_state.leads:
+            for lead in st.session_state.leads[-5:]:
+                st.markdown(f'<div class="data-card"><strong>{lead["name"]}</strong> - Score: {lead["score"]}/100<br><small>{lead["created_at"].strftime("%Y-%m-%d") if lead.get("created_at") else "Just now"}</small></div>', unsafe_allow_html=True)
+        else:
+            st.info("No leads yet")
     
     with col2:
         st.markdown('<div class="section-header">📧 Recent Emails</div>', unsafe_allow_html=True)
-        for log in st.session_state.email_log[-5:]:
-            st.markdown(f'<div class="data-card"><strong>{log["subject"][:30]}...</strong><br><small>To: {log["to"]}</small></div>', unsafe_allow_html=True)
+        if st.session_state.email_log:
+            for log in st.session_state.email_log[-5:]:
+                st.markdown(f'<div class="data-card"><strong>{log["subject"][:30]}...</strong><br><small>To: {log["to"]}</small></div>', unsafe_allow_html=True)
+        else:
+            st.info("No emails sent yet")
 
 # ============ IMPORT LEADS ============
 elif st.session_state.page == 'import_leads':
@@ -347,12 +377,8 @@ elif st.session_state.page == 'system_info':
             <div class="data-card">
                 <p><strong>Hostname:</strong> {info['hostname']}</p>
                 <p><strong>Platform:</strong> {info['platform']}</p>
+                <p><strong>Version:</strong> {info['platform_version']}</p>
                 <p><strong>Processor:</strong> {info['processor'] or 'N/A'}</p>
-                <p><strong>CPU Cores:</strong> {info['cpu_count']}</p>
-                <p><strong>CPU Usage:</strong> {info['cpu_percent']}%</p>
-                <p><strong>Total RAM:</strong> {info['memory_total']:.1f} GB</p>
-                <p><strong>Available RAM:</strong> {info['memory_available']:.1f} GB</p>
-                <p><strong>RAM Usage:</strong> {info['memory_percent']}%</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -363,7 +389,7 @@ elif st.session_state.page == 'folder_analyzer':
     folder_path = st.text_input("Folder Path", placeholder="/home/user/Documents or C:\\Users\\User\\Documents")
     
     if st.button("Analyze", type="primary"):
-        if folder_path:
+        if folder_path and os.path.exists(folder_path):
             with st.spinner("Analyzing..."):
                 folders = analyze_folders(folder_path)
                 if folders:
@@ -371,30 +397,13 @@ elif st.session_state.page == 'folder_analyzer':
                         st.markdown(f"""
                         <div class="data-card">
                             <strong>{folder['name']}</strong><br>
-                            Size: {folder['size_gb']:.2f} GB<br>
-                            Items: {folder['item_count']:,}
+                            Size: {folder['size_gb']:.2f} GB ({folder['size_mb']:.0f} MB)
                         </div>
                         """, unsafe_allow_html=True)
                 else:
-                    st.warning("No folders found or unable to access")
-
-# ============ BACKUP MANAGER ============
-elif st.session_state.page == 'backup_manager':
-    st.markdown('<div class="section-header">💾 Backup Manager</div>', unsafe_allow_html=True)
-    
-    backup_source = st.text_input("Source Folder", placeholder="/home/user/important_data")
-    backup_name = st.text_input("Backup Name (optional)", placeholder="auto-generated")
-    
-    if st.button("Create Backup", type="primary"):
-        if backup_source:
-            with st.spinner("Creating backup..."):
-                result = create_backup(backup_source, backup_name)
-                if result['success']:
-                    st.success(f"Backup created: {result['name']}.zip ({result['size_mb']:.1f} MB)")
-                    with open(result['path'], 'rb') as f:
-                        st.download_button("Download Backup", f, f"{result['name']}.zip", "application/zip")
-                else:
-                    st.error(f"Failed: {result['error']}")
+                    st.warning("No folders found")
+        else:
+            st.error("Please enter a valid path")
 
 # ============ DNS AUDIT ============
 elif st.session_state.page == 'dns_audit':
@@ -403,13 +412,13 @@ elif st.session_state.page == 'dns_audit':
     domain = st.text_input("Domain", placeholder="example.com")
     if st.button("Run Audit", type="primary"):
         if domain:
+            import socket
+            results = check_dns(domain)
             st.markdown(f"""
             <div class="data-card">
                 <h4>DNS Records for {domain}</h4>
-                <p>✅ A Records: Found</p>
-                <p>✅ MX Records: Found</p>
-                <p>⚠️ SPF: Not configured</p>
-                <p>❌ DMARC: Not found</p>
+                <p>✅ A Record: {'Found' if results.get('a_record') else 'Not found'}</p>
+                <p>✅ MX Record: {'Found' if results.get('mx_record') else 'Not found'}</p>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -422,14 +431,19 @@ elif st.session_state.page == 'website_audit':
     url = st.text_input("Website URL", placeholder="https://example.com")
     if st.button("Run Audit", type="primary"):
         if url:
-            st.markdown(f"""
-            <div class="data-card">
-                <h4>Website Audit for {url}</h4>
-                <p>✅ SSL Certificate: Valid</p>
-                <p>✅ HTTPS: Enabled</p>
-                <p>⚠️ Security Headers: Partial</p>
-            </div>
-            """, unsafe_allow_html=True)
+            try:
+                import requests
+                results = check_website(url)
+                st.markdown(f"""
+                <div class="data-card">
+                    <h4>Website Audit for {url}</h4>
+                    <p>✅ Reachable: {'Yes' if results.get('reachable') else 'No'}</p>
+                    <p>✅ HTTPS: {'Enabled' if results.get('https') else 'Disabled'}</p>
+                    <p>📊 Status Code: {results.get('status_code', 'N/A')}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            except ImportError:
+                st.info("Install requests: pip install requests")
         else:
             st.warning("Please enter a URL")
 
@@ -443,10 +457,10 @@ elif st.session_state.page == 'email_security':
             st.markdown(f"""
             <div class="data-card">
                 <h4>Email Security for {domain}</h4>
-                <p>✅ SPF: Configured</p>
-                <p>⚠️ DKIM: Not Found</p>
-                <p>❌ DMARC: Not Configured</p>
-                <p style="color:#f97316;">Risk: Moderate</p>
+                <p>📧 SPF: Check suggested</p>
+                <p>🔑 DKIM: Check suggested</p>
+                <p>🛡️ DMARC: Recommended</p>
+                <p style="color:#f97316;">Risk: Unknown - Full audit requires DNS tools</p>
             </div>
             """, unsafe_allow_html=True)
         else:
