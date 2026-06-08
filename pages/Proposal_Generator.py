@@ -1,119 +1,217 @@
-import sys, os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from dotenv import load_dotenv
-load_dotenv()
+# pages/Proposal_Generator.py
+import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import streamlit as st
-from modules.theme import THEME_CSS
-st.markdown(THEME_CSS, unsafe_allow_html=True)
-from modules.proposal_generator import generate_cold_email, generate_whatsapp_message, generate_pdf_proposal
-from modules.crm import get_all_companies, get_company, log_activity, update_stage
-from datetime import datetime
+from dotenv import load_dotenv
 
-st.markdown("# 📄 Proposal Generator")
-st.caption("Generate personalised emails, WhatsApp pitches and branded PDF proposals.")
-st.markdown("---")
+load_dotenv()
 
-def get_ctx():
-    if "last_research" in st.session_state:
-        r = st.session_state["last_research"]
-        l = st.session_state.get("last_lead_score")
-        ai = st.session_state.get("ai_for_proposal") or st.session_state.get("last_ai") or {}
-        dns = r.dns_result
-        findings = [f"{f.check}: {f.detail}" for f in dns.findings] if dns else []
-        return {"company_name":r.company_name,"website":r.website or "","address":r.address or "","email":r.email or "","phone":r.phone or "","lead_score":l.total if l else 0,"findings":findings,"risks":ai.get("business_risks",["Email security issues","Website security gap"]),"recommendations":ai.get("recommended_services",["Business Email Fix","IT Audit"]),"ai_summary":ai.get("company_summary","")}, st.session_state.get("last_company_id")
-    return None, None
+# Import theme first with error handling
+try:
+    from modules.theme import THEME_CSS
+    st.markdown(THEME_CSS, unsafe_allow_html=True)
+except Exception as e:
+    st.warning(f"Theme loading error: {e}")
+    # Continue without theme
 
-ctx, cid = get_ctx()
-
-use_crm = st.toggle("Select from CRM pipeline")
-if use_crm:
-    companies = get_all_companies()
-    if companies:
-        opts = {f"{c.company_name} — Score {int(c.lead_score or 0)}": c.id for c in companies}
-        sel = st.selectbox("Company", list(opts.keys()))
-        cid = opts[sel]
-        c = get_company(cid)
-        ctx = {"company_name":c.company_name,"website":c.website or "","address":c.address or "","email":c.email or "","phone":c.phone or "","lead_score":int(c.lead_score or 0),"findings":[f"Email score: {c.dns_score}/100"],"risks":["Email impersonation risk","Website security gap"],"recommendations":["Business Email Fix","IT Infrastructure Audit"],"ai_summary":c.ai_summary or ""}
-
-if not ctx:
-    st.markdown("""<div class="empty-state" style="margin-top:4rem"><div class="empty-state-icon">📄</div>
-        <div class="empty-state-title">No company loaded</div>
-        <div class="empty-state-sub">Run a Company Research first or select from CRM above</div>
-    </div>""", unsafe_allow_html=True)
+# Import other modules
+try:
+    from modules.database import get_session, CRMCompany
+except Exception as e:
+    st.error(f"Database import error: {e}")
+    st.info("Please make sure database.py exists in the modules folder")
     st.stop()
 
-# Editable details
-with st.expander("✏️ Edit contact details"):
-    ec1,ec2 = st.columns(2)
-    with ec1:
-        ctx["company_name"] = st.text_input("Company Name", ctx["company_name"])
-        ctx["address"] = st.text_input("Address", ctx.get("address",""))
-    with ec2:
-        contact = st.text_input("Contact Name / Title", "The Director")
-        ctx["email"] = st.text_input("Email", ctx.get("email",""))
-
+st.markdown("# 📄 Proposal Generator")
+st.caption("Create professional proposals for your leads")
 st.markdown("---")
 
-# ── Split layout: controls left, preview right ──
-left, right = st.columns([1, 1.2])
+# Get company from session state
+company_id = st.session_state.get("last_company_id")
 
-with left:
-    st.markdown("### 📝 Generate")
-    tab1,tab2,tab3 = st.tabs(["📧 Cold Email","💬 WhatsApp","📑 PDF"])
+if company_id:
+    try:
+        db = get_session()
+        company = db.query(CRMCompany).filter_by(id=company_id).first()
+        db.close()
+        
+        if company:
+            st.markdown(f"## Generating Proposal for {company.name}")
+            
+            # Company Information Display
+            with st.expander("Company Information", expanded=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Company Details:**")
+                    st.write(f"• Name: {company.name}")
+                    st.write(f"• Domain: {company.domain}")
+                    st.write(f"• Website: {company.website or 'N/A'}")
+                with col2:
+                    st.write("**Contact Information:**")
+                    st.write(f"• Phone: {company.phone or 'N/A'}")
+                    st.write(f"• Email: {company.email or 'N/A'}")
+                    st.write(f"• Lead Score: {company.lead_score}/100")
+            
+            # Service selection
+            st.markdown("### Select Services to Include")
+            
+            services = []
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.checkbox("📧 Email Security & DMARC Setup", value=True):
+                    services.append("Email Security & DMARC Implementation")
+                
+                if st.checkbox("🔒 SSL Certificate Installation"):
+                    services.append("SSL Certificate Installation")
+                
+                if st.checkbox("📬 Professional Email Setup"):
+                    services.append("Business Email Configuration (Google/Microsoft 365)")
+                
+                if st.checkbox("🛡️ IT Infrastructure Audit"):
+                    services.append("Complete IT Security Audit")
+            
+            with col2:
+                if st.checkbox("🌐 Website Development"):
+                    services.append("Professional Website Development")
+                
+                if st.checkbox("📈 SEO & Digital Marketing"):
+                    services.append("SEO & Digital Marketing Package")
+                
+                if st.checkbox("☁️ Cloud Migration"):
+                    services.append("Cloud Migration & Setup")
+                
+                if st.checkbox("🔐 Cybersecurity Assessment"):
+                    services.append("Cybersecurity Risk Assessment")
+            
+            # Additional options
+            st.markdown("### Proposal Details")
+            additional_notes = st.text_area("Additional Notes/Special Requirements", 
+                                           placeholder="Any specific requirements or notes to include in the proposal...")
+            
+            if services:
+                # Generate proposal based on lead score
+                if company.lead_score >= 70:
+                    urgency = "High Priority - Immediate Action Recommended"
+                    discount = "10% early engagement discount"
+                elif company.lead_score >= 50:
+                    urgency = "Medium Priority - Schedule Discussion"
+                    discount = "5% early engagement discount"
+                else:
+                    urgency = "Discovery Phase - Further Assessment Needed"
+                    discount = "Contact for custom pricing"
+                
+                # Create proposal
+                proposal = f"""TECHWOKX PROPOSAL
 
-    with tab1:
-        if st.button("Generate Email", type="primary", use_container_width=True):
-            e = generate_cold_email(ctx["company_name"], contact, ctx["findings"], ctx["risks"], ctx["lead_score"])
-            st.session_state["gen_email"] = e
-            if cid: log_activity(cid, "Email Generated", f"Cold email for {ctx['company_name']}")
-        if "gen_email" in st.session_state:
-            e = st.session_state["gen_email"]
-            st.text_input("Subject", e["subject"])
-            st.download_button("⬇️ Download .txt", e["body"], file_name=f"email_{ctx['company_name'].replace(' ','_')}.txt")
+Prepared For: {company.name.upper()}
+Date: {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}
+Priority Level: {urgency}
 
-    with tab2:
-        if st.button("Generate WhatsApp", type="primary", use_container_width=True):
-            wa = generate_whatsapp_message(ctx["company_name"], ctx["findings"], ctx["lead_score"])
-            st.session_state["gen_wa"] = wa
-            if cid: log_activity(cid, "WhatsApp Generated", f"WhatsApp for {ctx['company_name']}")
-        if "gen_wa" in st.session_state:
-            wa_enc = st.session_state["gen_wa"].replace(" ","%20").replace("\n","%0A")
-            st.markdown(f"[📱 Open in WhatsApp](https://wa.me/?text={wa_enc})")
-            st.download_button("⬇️ Download", st.session_state["gen_wa"], file_name="whatsapp.txt")
+EXECUTIVE SUMMARY
+-----------------
+This proposal outlines technology services to enhance {company.name}'s digital infrastructure, 
+security posture, and operational efficiency. Based on our initial assessment, we have identified 
+key areas for improvement that will drive business growth and security.
 
-    with tab3:
-        if st.button("Generate PDF Proposal", type="primary", use_container_width=True):
-            with st.spinner("Building PDF..."):
-                try:
-                    pdf = generate_pdf_proposal({"company_name":ctx["company_name"],"lead_score":ctx["lead_score"]}, ctx["findings"][:8], ctx["risks"][:6], ctx["recommendations"], ctx.get("ai_summary",""))
-                    st.session_state["gen_pdf"] = pdf
-                    if cid: log_activity(cid,"Proposal Generated","PDF proposal created"); update_stage(cid,"Proposal Sent")
-                except Exception as ex:
-                    st.error(f"Error: {ex}")
-        if "gen_pdf" in st.session_state:
-            st.download_button("⬇️ Download PDF", st.session_state["gen_pdf"],
-                file_name=f"TechWokx_Proposal_{ctx['company_name'].replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf", mime="application/pdf")
+PROPOSED SERVICES
+----------------
+{chr(10).join([f'{i+1}. {s}' for i, s in enumerate(services)])}
 
-with right:
-    st.markdown("### 👁️ Live Preview")
-    preview_type = st.radio("", ["Email","WhatsApp","About Company"], horizontal=True, label_visibility="collapsed")
+INVESTMENT OVERVIEW
+------------------
+The following investment is recommended for the proposed services:
 
-    if preview_type == "Email" and "gen_email" in st.session_state:
-        e = st.session_state["gen_email"]
-        st.markdown(f'<div class="data-card"><div style="font-size:0.8rem;color:#475569;margin-bottom:0.5rem">Subject</div><div style="font-weight:600;color:#e2e8f0;font-size:0.9rem">{e["subject"]}</div></div>', unsafe_allow_html=True)
-        st.text_area("", e["body"], height=480, label_visibility="collapsed")
-    elif preview_type == "WhatsApp" and "gen_wa" in st.session_state:
-        st.markdown(f'<div class="data-card" style="border-radius:12px;max-width:380px"><div style="background:#1a472a;padding:0.75rem 1rem;border-radius:10px;font-size:0.85rem;color:#e2e8f0;white-space:pre-wrap">{st.session_state["gen_wa"]}</div></div>', unsafe_allow_html=True)
-    elif preview_type == "About Company":
-        score_cls = "score-hot" if ctx["lead_score"]>=90 else "score-warm" if ctx["lead_score"]>=70 else "score-good"
-        st.markdown(f"""<div class="data-card">
-            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
-                <div class="score-ring {score_cls}" style="width:70px;height:70px;font-size:1.2rem">{ctx['lead_score']}<br><span style="font-size:0.55rem">/100</span></div>
-                <div><div style="font-size:1.1rem;font-weight:700;color:#e2e8f0">{ctx['company_name']}</div>
-                <div style="font-size:0.8rem;color:#475569">{ctx.get('website','—')}</div></div>
-            </div>""", unsafe_allow_html=True)
-        for l,v in [("Phone",ctx.get("phone","—")),("Email",ctx.get("email","—")),("Address",ctx.get("address","—")),("Score",f"{ctx['lead_score']}/100")]:
-            st.markdown(f'<div class="profile-row"><span class="profile-label">{l}</span><span class="profile-value">{v}</span></div>', unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="empty-state"><div class="empty-state-icon">👁️</div><div class="empty-state-title">Generate content to preview it here</div></div>', unsafe_allow_html=True)
+| Service Category | Investment (GHS) |
+|-----------------|------------------|
+{chr(10).join([f'| {s[:40]}... | To be discussed |' for s in services])}
+
+Discount Available: {discount}
+
+WHY TECHWOKX?
+-------------
+• 24/7 Technical Support
+• Certified Professionals
+• Proven Track Record
+• Customized Solutions
+• Local Presence
+
+DELIVERABLES & TIMELINE
+-----------------------
+• Initial Assessment: Week 1
+• Implementation: Weeks 2-4
+• Testing & Validation: Week 5
+• Training & Handover: Week 6
+• Ongoing Support: Continuous
+
+NEXT STEPS
+----------
+1. Schedule discovery call
+2. Detailed requirements gathering
+3. Customized implementation plan
+4. Project kickoff meeting
+
+TERMS & CONDITIONS
+-----------------
+• Payment: 50% upfront, 50% upon completion
+• Warranty: 30 days post-implementation
+• Support: Included for first 3 months
+
+{additional_notes if additional_notes else ""}
+
+CONTACT INFORMATION
+------------------
+TechWokx Technologies
+Email: sales@techwokx.com
+Phone: +233 XX XXX XXXX
+
+This proposal is valid for 30 days from the date above.
+
+---
+Proposal Generated by TechWokx Lead Intelligence System
+"""
+                
+                # Display proposal
+                st.markdown("### Proposal Preview")
+                st.text_area("Proposal Content", proposal, height=400)
+                
+                # Download button
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.download_button(
+                        label="📥 Download as Text File",
+                        data=proposal,
+                        file_name=f"proposal_{company.name.replace(' ', '_')}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+                
+                with col2:
+                    if st.button("📋 Copy to Clipboard", use_container_width=True):
+                        st.write("Proposal text selected above - use Ctrl+C to copy")
+                        st.info("Select all text in the proposal box and copy (Ctrl+C / Cmd+C)")
+                
+                with col3:
+                    if st.button("🔄 Reset Form", use_container_width=True):
+                        st.rerun()
+            else:
+                st.warning("⚠️ Please select at least one service to generate a proposal")
+        else:
+            st.error("Company not found in database")
+    except Exception as e:
+        st.error(f"Error loading company data: {str(e)}")
+else:
+    st.info("💡 No company selected. Please research a company first from the Company Research page.")
+    st.markdown("""
+    ### How to generate a proposal:
+    1. Go to **Company Research** page
+    2. Search for a company
+    3. Return here to generate a proposal
+    """)
+    
+    if st.button("🔍 Go to Company Research"):
+        st.switch_page("pages/company_research.py")
