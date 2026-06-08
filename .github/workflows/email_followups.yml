@@ -1,0 +1,20 @@
+name: Daily Email Follow-ups
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # 9 AM GMT daily
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  send-followups:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python scheduler.py
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
