@@ -1,181 +1,349 @@
+# pages/Proposal_Generator.py - Light Mode Version
+import sys
 import os
-import io
-import qrcode
-from datetime import datetime
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
-TECHWOKX_ORANGE = colors.HexColor("#EA580C")
-TECHWOKX_DARK = colors.HexColor("#0D1526")
-TECHWOKX_BLUE = colors.HexColor("#1E3A5F")
-AUDIT_URL = "https://techwokx.online/#audit"
+# Add parent directory to path FIRST
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Import Streamlit FIRST
+import streamlit as st
 
-def generate_qr_code() -> io.BytesIO:
-    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
-    qr.add_data(AUDIT_URL)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
+# Set page config (must be first Streamlit command)
+st.set_page_config(
+    page_title="Proposal Generator",
+    page_icon="📄",
+    layout="wide"
+)
 
+# Now import other modules
+from dotenv import load_dotenv
+load_dotenv()
 
-def generate_cold_email(company: str, contact: str, findings: list, risks: list, lead_score: int) -> dict:
-    risk_word = "CRITICAL" if lead_score >= 90 else "HIGH" if lead_score >= 70 else "MEDIUM"
-    emoji = "\U0001f534" if lead_score >= 90 else "\U0001f7e0" if lead_score >= 70 else "\U0001f7e1"
-    subject = f"{emoji} {company}: Free 5-Step Email Security Audit \u2014 {risk_word} Risk Detected"
+# Import database modules
+try:
+    from modules.database import get_session, CRMCompany
+    from datetime import datetime
+    DB_AVAILABLE = True
+except ImportError as e:
+    DB_AVAILABLE = False
+    st.error(f"⚠️ Database module not available: {e}")
+    st.stop()
 
-    findings_text = "\n".join(f"\u2022 {f}" for f in findings[:5])
-    risks_text = "\n".join(f"\u2022 {r}" for r in risks[:4])
+# Light mode CSS for Proposal Generator only
+st.markdown("""
+<style>
+    /* Light mode for Proposal Generator */
+    .stApp {
+        background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
+    }
+    
+    /* Main content area */
+    .main .block-container {
+        background: transparent;
+    }
+    
+    /* Headers - Dark color for light background */
+    h1, h2, h3, h4, h5, h6 {
+        color: #1e293b !important;
+    }
+    
+    /* Paragraph text */
+    p, li, .stMarkdown, .stCaption {
+        color: #334155 !important;
+    }
+    
+    /* Metric styling */
+    [data-testid="stMetricValue"] {
+        color: #f59e0b !important;
+        font-size: 1.8rem !important;
+    }
+    
+    [data-testid="stMetricLabel"] {
+        color: #64748b !important;
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: white;
+        font-weight: 600;
+        border: none;
+        transition: all 0.3s ease;
+    }
+    
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #d97706, #b45309);
+        transform: translateY(-2px);
+    }
+    
+    /* Text input */
+    .stTextInput > div > div > input {
+        background: white;
+        border: 1px solid #e2e8f0;
+        color: #1e293b;
+    }
+    
+    .stTextInput > div > div > input:focus {
+        border-color: #f59e0b;
+        box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.1);
+    }
+    
+    /* Text area */
+    .stTextArea > div > div > textarea {
+        background: white;
+        border: 1px solid #e2e8f0;
+        color: #1e293b;
+    }
+    
+    /* Select box */
+    .stSelectbox > div > div {
+        background: white;
+        border: 1px solid #e2e8f0;
+    }
+    
+    /* Checkbox */
+    .stCheckbox label {
+        color: #334155 !important;
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        background: #f1f5f9;
+        border-radius: 8px;
+        color: #1e293b;
+    }
+    
+    .streamlit-expanderHeader:hover {
+        background: #e2e8f0;
+    }
+    
+    /* Code blocks / Text area for proposal */
+    .stTextArea textarea {
+        background: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+        color: #1e293b !important;
+        font-family: monospace;
+    }
+    
+    /* Dividers */
+    hr {
+        border-color: #e2e8f0;
+    }
+    
+    /* Info messages */
+    .stAlert {
+        background-color: #fef3c7 !important;
+        border-left: 4px solid #f59e0b !important;
+        color: #92400e !important;
+    }
+    
+    /* Success messages */
+    .stAlert[data-baseweb="notification"] {
+        background-color: #d1fae5 !important;
+        border-left: 4px solid #10b981 !important;
+        color: #065f46 !important;
+    }
+    
+    /* Warning messages */
+    .stAlert[data-baseweb="notification"]:has(.stAlertWarning) {
+        background-color: #fed7aa !important;
+        border-left: 4px solid #f97316 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    body = f"""Re: Free 5-Step Email Security Audit for {company}
+st.markdown("# 📄 Proposal Generator")
+st.caption("Create professional proposals for your leads (Light Mode)")
+st.markdown("---")
 
-Dear {contact},
+# Get company from session state
+company_id = st.session_state.get("last_company_id")
 
-We are interested in doing business with {company}, so we took the time to research your current setup including your website, domain, and email infrastructure.
-
-Here\u2019s what we discovered:
-
-{emoji} Risk Assessment for {company}: {risk_word}
-
-What We Found:
-{findings_text}
-
-Please note: This assessment was done outside {company}\u2019s network, so we may not have captured every detail. That is why we are sending this letter \u2014 to formally introduce TechWokx to {company} and find out if there is an opportunity to help.
-
-What This Means For {company}:
-{risks_text}
-
-What We Can Do For You:
-\u2713 Protect {company} from email impersonation and fraud
-\u2713 Ensure all emails reach your clients\u2019 inboxes
-\u2713 Stop business emails from landing in spam folders
-\u2713 Secure your website so visitors trust your business
-\u2713 Free Professional Email Signature for one staff member
-
-\U0001f4de Next Step:
-Take our FREE 5-Step Email Risk Audit:
-1. Go to techwokx.online/#audit
-2. Receive an instant personalised risk score for {company}
-
-About TechWokx:
-We provide professional IT support and email solutions for businesses in Ghana.
-\u2022 Business Email Health Fix \u2014 Stop emails going to spam, protect from impersonation
-\u2022 Monthly IT Retainer \u2014 On-call support for devices, networks, software
-\u2022 IT Infrastructure Audit \u2014 Full review with clear report and action plan
-\u2022 Process Automation \u2014 Eliminate repetitive tasks
-
-We work on a \u201cdiagnose before prescribe\u201d basis.
-
-Best regards,
-
-George Jabley
-TechWokx IT Solutions
-hello@techwokx.online | techwokx.online
-+233 264 375 628 | WhatsApp: +233 555 087 407"""
-
-    return {"subject": subject, "body": body}
-
-
-def generate_whatsapp_message(company: str, findings: list, lead_score: int) -> str:
-    risk_word = "CRITICAL" if lead_score >= 90 else "HIGH" if lead_score >= 70 else "MEDIUM"
-    top_issues = findings[:2] if findings else ["email security issues", "domain vulnerability"]
-    issues_str = " and ".join(top_issues)
-    return f"""Hi, I\u2019m George from TechWokx Ghana \ud83d\udc4b
-
-We recently scanned *{company}*\u2019s email and web infrastructure and found *{risk_word}* risk issues including {issues_str}.
-
-We\u2019d love to help fix this for free consultation. Can we have a 10-minute call this week?
-
-\ud83d\udd17 Full risk report: techwokx.online/#audit
-\ud83d\udce7 hello@techwokx.online"""
-
-
-def generate_pdf_proposal(company_data: dict, findings: list, risks: list, recommendations: list, ai_summary: str = "") -> bytes:
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=15*mm, bottomMargin=15*mm, leftMargin=20*mm, rightMargin=20*mm)
-    styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle("title", parent=styles["Heading1"], fontSize=22, textColor=TECHWOKX_ORANGE, spaceAfter=4)
-    h2_style = ParagraphStyle("h2", parent=styles["Heading2"], fontSize=13, textColor=TECHWOKX_BLUE, spaceBefore=12, spaceAfter=4)
-    body_style = ParagraphStyle("body", parent=styles["Normal"], fontSize=10, leading=15, spaceAfter=4)
-    muted_style = ParagraphStyle("muted", parent=styles["Normal"], fontSize=9, textColor=colors.grey)
-
-    story = []
-    today = datetime.now().strftime("%d %B %Y")
-    company = company_data.get("company_name", "Unknown Company")
-    lead_score = company_data.get("lead_score", 0)
-    risk_label = "CRITICAL" if lead_score >= 90 else "HIGH" if lead_score >= 70 else "MEDIUM"
-    risk_color = colors.red if lead_score >= 90 else TECHWOKX_ORANGE if lead_score >= 70 else colors.green
-
-    # Header
-    story.append(Paragraph("TechWokx IT Solutions", title_style))
-    story.append(Paragraph(f"IT Infrastructure & Email Security Report", h2_style))
-    story.append(HRFlowable(width="100%", color=TECHWOKX_ORANGE, thickness=2))
-    story.append(Spacer(1, 6))
-
-    # Company + date table
-    meta = [
-        ["Prepared for:", company],
-        ["Date:", today],
-        ["Risk Level:", risk_label],
-        ["Lead Score:", f"{lead_score}/100"],
-    ]
-    t = Table(meta, colWidths=[45*mm, 130*mm])
-    t.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
-        ("TEXTCOLOR", (1, 2), (1, 2), risk_color),
-        ("FONTNAME", (1, 2), (1, 2), "Helvetica-Bold"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    story.append(t)
-    story.append(Spacer(1, 8))
-
-    # AI Summary
-    if ai_summary:
-        story.append(Paragraph("Executive Summary", h2_style))
-        story.append(Paragraph(ai_summary, body_style))
-
-    # Findings
-    story.append(Paragraph("What We Found", h2_style))
-    for f in findings:
-        icon = "\u2717" if any(bad in f.lower() for bad in ["no ", "fail", "down", "invalid"]) else "\u26a0"
-        story.append(Paragraph(f"{icon} {f}", body_style))
-    story.append(Spacer(1, 6))
-
-    # Risks
-    story.append(Paragraph("Business Risks", h2_style))
-    for r in risks:
-        story.append(Paragraph(f"\u2022 {r}", body_style))
-    story.append(Spacer(1, 6))
-
-    # Recommendations
-    story.append(Paragraph("What TechWokx Can Do For You", h2_style))
-    for rec in recommendations:
-        story.append(Paragraph(f"\u2713 {rec}", body_style))
-    story.append(Spacer(1, 10))
-
-    # QR Code + CTA
-    story.append(HRFlowable(width="100%", color=TECHWOKX_ORANGE, thickness=1))
-    story.append(Spacer(1, 6))
+if company_id:
     try:
-        qr_buf = generate_qr_code()
-        qr_img = Image(qr_buf, width=30*mm, height=30*mm)
-        cta_data = [[qr_img, Paragraph(f"Take our FREE 5-Step Email Risk Audit\n\nScan the QR code or visit:\ntechwokx.online/#audit\n\nhello@techwokx.online | +233 264 375 628", body_style)]]
-        cta_table = Table(cta_data, colWidths=[35*mm, 140*mm])
-        story.append(cta_table)
-    except Exception:
-        story.append(Paragraph("Take our FREE audit at techwokx.online/#audit", body_style))
+        db = get_session()
+        company = db.query(CRMCompany).filter_by(id=company_id).first()
+        db.close()
+        
+        if company:
+            st.markdown(f"## Generating Proposal for {company.name}")
+            
+            # Company Information Display
+            with st.expander("Company Information", expanded=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Company Details:**")
+                    st.write(f"• Name: {company.name}")
+                    st.write(f"• Domain: {company.domain}")
+                    st.write(f"• Website: {company.website or 'N/A'}")
+                with col2:
+                    st.write("**Contact Information:**")
+                    st.write(f"• Phone: {company.phone or 'N/A'}")
+                    st.write(f"• Email: {company.email or 'N/A'}")
+                    st.write(f"• Lead Score: {company.lead_score}/100")
+            
+            # Service selection
+            st.markdown("### Select Services to Include")
+            
+            services = []
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.checkbox("📧 Email Security & DMARC Setup", value=True):
+                    services.append("Email Security & DMARC Implementation")
+                
+                if st.checkbox("🔒 SSL Certificate Installation"):
+                    services.append("SSL Certificate Installation")
+                
+                if st.checkbox("📬 Professional Email Setup"):
+                    services.append("Business Email Configuration (Google/Microsoft 365)")
+                
+                if st.checkbox("🛡️ IT Infrastructure Audit"):
+                    services.append("Complete IT Security Audit")
+            
+            with col2:
+                if st.checkbox("🌐 Website Development"):
+                    services.append("Professional Website Development")
+                
+                if st.checkbox("📈 SEO & Digital Marketing"):
+                    services.append("SEO & Digital Marketing Package")
+                
+                if st.checkbox("☁️ Cloud Migration"):
+                    services.append("Cloud Migration & Setup")
+                
+                if st.checkbox("🔐 Cybersecurity Assessment"):
+                    services.append("Cybersecurity Risk Assessment")
+            
+            # Additional options
+            st.markdown("### Proposal Details")
+            additional_notes = st.text_area("Additional Notes/Special Requirements", 
+                                           placeholder="Any specific requirements or notes to include in the proposal...")
+            
+            if services:
+                # Generate proposal based on lead score
+                if company.lead_score and company.lead_score >= 70:
+                    urgency = "High Priority - Immediate Action Recommended"
+                    discount = "10% early engagement discount"
+                elif company.lead_score and company.lead_score >= 50:
+                    urgency = "Medium Priority - Schedule Discussion"
+                    discount = "5% early engagement discount"
+                else:
+                    urgency = "Discovery Phase - Further Assessment Needed"
+                    discount = "Contact for custom pricing"
+                
+                # Create proposal
+                proposal = f"""TECHWOKX PROPOSAL
 
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("George Jabley | TechWokx IT Solutions | hello@techwokx.online | techwokx.online", muted_style))
+Prepared For: {company.name.upper()}
+Date: {datetime.now().strftime('%Y-%m-%d')}
+Priority Level: {urgency}
 
-    doc.build(story)
-    return buf.getvalue()
+EXECUTIVE SUMMARY
+-----------------
+This proposal outlines technology services to enhance {company.name}'s digital infrastructure, 
+security posture, and operational efficiency. Based on our initial assessment, we have identified 
+key areas for improvement that will drive business growth and security.
+
+PROPOSED SERVICES
+----------------
+{chr(10).join([f'{i+1}. {s}' for i, s in enumerate(services)])}
+
+INVESTMENT OVERVIEW
+------------------
+The following investment is recommended for the proposed services:
+
+| Service Category | Investment (GHS) |
+|-----------------|------------------|
+{chr(10).join([f'| {s[:40]}... | To be discussed |' for s in services])}
+
+Discount Available: {discount}
+
+WHY TECHWOKX?
+-------------
+• 24/7 Technical Support
+• Certified Professionals
+• Proven Track Record
+• Customized Solutions
+• Local Presence
+
+DELIVERABLES & TIMELINE
+-----------------------
+• Initial Assessment: Week 1
+• Implementation: Weeks 2-4
+• Testing & Validation: Week 5
+• Training & Handover: Week 6
+• Ongoing Support: Continuous
+
+NEXT STEPS
+----------
+1. Schedule discovery call
+2. Detailed requirements gathering
+3. Customized implementation plan
+4. Project kickoff meeting
+
+TERMS & CONDITIONS
+-----------------
+• Payment: 50% upfront, 50% upon completion
+• Warranty: 30 days post-implementation
+• Support: Included for first 3 months
+
+{additional_notes if additional_notes else ""}
+
+CONTACT INFORMATION
+------------------
+TechWokx Technologies
+Email: sales@techwokx.com
+Phone: +233 XX XXX XXXX
+
+This proposal is valid for 30 days from the date above.
+
+---
+Proposal Generated by TechWokx Lead Intelligence System
+"""
+                
+                # Display proposal
+                st.markdown("### Proposal Preview")
+                st.text_area("Proposal Content", proposal, height=400)
+                
+                # Download button
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.download_button(
+                        label="📥 Download as Text File",
+                        data=proposal,
+                        file_name=f"proposal_{company.name.replace(' ', '_')}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+                
+                with col2:
+                    if st.button("📋 Copy to Clipboard", use_container_width=True):
+                        st.success("Select all text in the proposal box and copy (Ctrl+C / Cmd+C)")
+                
+                with col3:
+                    if st.button("🔄 Reset Form", use_container_width=True):
+                        st.rerun()
+            else:
+                st.warning("⚠️ Please select at least one service to generate a proposal")
+        else:
+            st.error("Company not found in database")
+    except Exception as e:
+        st.error(f"Error loading company data: {str(e)}")
+else:
+    st.info("💡 No company selected. Please research a company first from the Company Research page.")
+    st.markdown("""
+    ### How to generate a proposal:
+    1. Go to **Company Research** page
+    2. Search for a company
+    3. Return here to generate a proposal
+    """)
+    
+    if st.button("🔍 Go to Company Research", use_container_width=True):
+        try:
+            st.switch_page("pages/company_research.py")
+        except:
+            st.info("Please navigate to Company Research from the sidebar")
+
+# Footer
+st.markdown("---")
+st.caption(f"Proposal Generator (Light Mode) • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
