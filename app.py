@@ -1,40 +1,62 @@
-import sys, os
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# app.py (Root directory - Main entry point)
 import streamlit as st
-from dotenv import load_dotenv
-load_dotenv()
 
+# Set page config FIRST (must be the first Streamlit command)
 st.set_page_config(
-    page_title="TechWokx Lead Intelligence Engine",
-    page_icon="🔍", layout="wide",
+    page_title="TechWokx Lead Intelligence",
+    page_icon="🔍",
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
-from modules.theme import THEME_CSS
-st.markdown(THEME_CSS, unsafe_allow_html=True)
+# Simple navigation without importing modules
+st.markdown("# TechWokx Lead Intelligence")
+st.markdown("## AI-Powered Company Research & Lead Scoring")
 
-# ── Navigation (Streamlit 1.36+ compatible) ──
-pg = st.navigation({
-    "Main": [
-        st.Page("pages/Dashboard.py",        title="Dashboard",         icon="🏠"),
-    ],
-    "Research": [
-        st.Page("pages/Company_Research.py", title="Company Search",    icon="🔍"),
-        st.Page("pages/Bulk_Research.py",    title="Bulk Research",     icon="📋"),
-    ],
-    "Audits": [
-        st.Page("pages/IT_Audit.py",         title="DNS & Email Audit", icon="🛡️"),
-        st.Page("pages/Website_Audit.py",    title="Website & SSL",     icon="🌐"),
-    ],
-    "Intelligence": [
-        st.Page("pages/Lead_Intelligence.py",title="AI Analysis",       icon="🧠"),
-    ],
-    "Sales": [
-        st.Page("pages/Proposal_Generator.py",title="Proposals",        icon="📄"),
-        st.Page("pages/CRM.py",              title="CRM Pipeline",      icon="👥"),
-    ],
-    "System": [
-        st.Page("pages/Settings.py",         title="Settings",          icon="⚙️"),
-    ],
-})
-pg.run()
+st.markdown("---")
+
+st.markdown("""
+### Welcome to the Lead Intelligence Platform
+
+This platform helps you research companies, score leads, and generate proposals.
+
+**Available Features:**
+- 🔍 **Company Research** - Research any company in seconds
+- 📊 **Dashboard** - View your lead pipeline  
+- 👥 **CRM** - Manage your contacts
+- 📄 **Proposal Generator** - Create professional proposals
+- 🧠 **Lead Intelligence** - AI-powered insights
+- 🌐 **Website Audit** - Security and SSL checks
+
+**Quick Start:**
+1. Go to **Company Research** from the sidebar
+2. Enter a company name or website
+3. View detailed analysis and lead score
+4. Generate a proposal for hot leads
+""")
+
+# Sidebar navigation
+st.sidebar.markdown("# Navigation")
+st.sidebar.markdown("---")
+
+# Navigation buttons
+pages = {
+    "🔍 Company Research": "pages/company_research.py",
+    "📊 Dashboard": "pages/Dashboard.py",
+    "👥 CRM": "pages/CRM.py",
+    "📄 Proposal Generator": "pages/Proposal_Generator.py",
+    "🧠 Lead Intelligence": "pages/Lead_Intelligence.py",
+    "📊 Bulk Research": "pages/Bulk_Research.py",
+    "🌐 Website Audit": "pages/Website_Audit.py",
+}
+
+for page_name, page_path in pages.items():
+    if st.sidebar.button(page_name, use_container_width=True, key=page_name):
+        try:
+            st.switch_page(page_path)
+        except Exception as e:
+            st.sidebar.error(f"Could not load {page_name}")
+            st.sidebar.caption(str(e)[:50])
+
+st.sidebar.markdown("---")
+st.sidebar.caption("TechWokx Lead Intelligence v1.0")
