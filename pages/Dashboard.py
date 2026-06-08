@@ -1,9 +1,18 @@
-# NEW (safe)
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import streamlit as st
+
+st.set_page_config(page_title="Page Name", page_icon="📄", layout="wide")
+
+from dotenv import load_dotenv
+load_dotenv()
+
 try:
     from modules.theme import THEME_CSS
     st.markdown(THEME_CSS, unsafe_allow_html=True)
-except Exception:
-    # Fallback - no theme styling
+except:
     pass
 import pandas as pd
 import plotly.express as px
