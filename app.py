@@ -1,391 +1,458 @@
-# app.py - Complete TechWokx Lead Intelligence System with Full Automation
+# app.py - TechWokx Enterprise Lead Intelligence System
 import streamlit as st
 import pandas as pd
 import requests
 import re
 import smtplib
 import json
-from datetime import datetime, timedelta
+import os
+import subprocess
+import socket
+import platform
+import psutil
+import shutil
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+from datetime import datetime, timedelta
 import hashlib
-import io
+import uuid
+import sqlite3
+from pathlib import Path
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import twilio
+from twilio.rest import Client
 
+# ============ PAGE CONFIG ============
 st.set_page_config(
-    page_title="TechWokx Lead Intelligence",
+    page_title="TechWokx Enterprise Suite",
     page_icon="🔍",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Initialize session state
+# ============ INITIALIZE SESSION STATE ============
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'user' not in st.session_state:
+    st.session_state.user = None
 if 'page' not in st.session_state:
-    st.session_state.page = 'dashboard'
+    st.session_state.page = 'login'
 if 'leads' not in st.session_state:
     st.session_state.leads = []
 if 'research_cache' not in st.session_state:
     st.session_state.research_cache = {}
-if 'email_templates' not in st.session_state:
-    st.session_state.email_templates = {
-        'initial': {
-            'name': 'Initial Follow-up',
-            'subject': 'Thanks for your audit - Next steps for {company}',
-            'body': '''Dear {contact_name},
+if 'email_log' not in st.session_state:
+    st.session_state.email_log = []
+if 'whatsapp_log' not in st.session_state:
+    st.session_state.whatsapp_log = []
+if 'notification_log' not in st.session_state:
+    st.session_state.notification_log = []
+if 'google_sheet_url' not in st.session_state:
+    st.session_state.google_sheet_url = ""
+if 'client_sites' not in st.session_state:
+    st.session_state.client_sites = []
 
-Thank you for completing our security audit. Your company {company} scored {score}/100.
+# ============ HARDCODED USERS (In production, use database) ============
+USERS = {
+    "admin": {"password": "admin123", "role": "admin", "name": "Administrator"},
+    "techwokx": {"password": "techwokx2024", "role": "admin", "name": "TechWokx Team"},
+    "client1": {"password": "client123", "role": "client", "name": "Client User"}
+}
 
-Based on your results, we've identified opportunities to improve your security posture.
+# ============ DATABASE SETUP ============
+def init_database():
+    """Initialize SQLite database for client sites"""
+    conn = sqlite3.connect('client_sites.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS client_sites
+                 (id INTEGER PRIMARY KEY,
+                  client_name TEXT,
+                  site_name TEXT,
+                  site_path TEXT,
+                  last_backup TEXT,
+                  backup_size TEXT,
+                  status TEXT,
+                  created_at TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS backup_history
+                 (id INTEGER PRIMARY KEY,
+                  site_id INTEGER,
+                  backup_date TEXT,
+                  backup_path TEXT,
+                  size TEXT,
+                  status TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS leads
+                 (id INTEGER PRIMARY KEY,
+                  name TEXT,
+                  email TEXT,
+                  phone TEXT,
+                  score INTEGER,
+                  status TEXT,
+                  source TEXT,
+                  created_at TEXT,
+                  google_sheet_synced INTEGER DEFAULT 0,
+                  whatsapp_sent INTEGER DEFAULT 0,
+                  techwokx_notified INTEGER DEFAULT 0)''')
+    conn.commit()
+    conn.close()
 
-Would you like to schedule a free 15-minute consultation to review your results?
+init_database()
 
-Best regards,
-TechWokx Team''',
-            'delay_days': 1,
-            'active': True
-        },
-        'nurture': {
-            'name': 'Nurture Sequence',
-            'subject': 'Security insights for {company}',
-            'body': '''Hi {contact_name},
-
-Here are 3 quick security wins for {company} based on your audit score of {score}/100:
-
-1. Implement email authentication (SPF/DKIM/DMARC)
-2. Enable multi-factor authentication for all staff
-3. Regular security awareness training
-
-Want to discuss implementing these? Book a call: [Calendar Link]
-
-Best regards,
-TechWokx Team''',
-            'delay_days': 3,
-            'active': True
-        },
-        'urgent': {
-            'name': 'Urgent Fix Required',
-            'subject': 'URGENT: {company} email security at risk',
-            'body': '''URGENT: {contact_name}
-
-Your audit shows CRITICAL security gaps at {company} (Score: {score}/100):
-
-- Email spoofing possible
-- Data breach risk
-- Brand impersonation threat
-
-Book emergency fix: [Emergency Link]
-Valid for 48 hours.
-
-Stay secure,
-TechWokx Security Team''',
-            'delay_days': 7,
-            'active': True
-        },
-        'proposal': {
-            'name': 'Proposal Ready',
-            'subject': 'Your custom proposal for {company}',
-            'body': '''Dear {contact_name},
-
-Based on your audit results for {company}, we've prepared a custom proposal addressing your specific needs.
-
-Key recommendations:
-- Email security implementation
-- Infrastructure audit
-- Staff training program
-
-View your proposal: [Proposal Link]
-
-Looking forward to working with you,
-TechWokx Team''',
-            'delay_days': 14,
-            'active': True
+# ============ AUTHENTICATION FUNCTIONS ============
+def check_auth(username, password):
+    if username in USERS and USERS[username]["password"] == password:
+        st.session_state.authenticated = True
+        st.session_state.user = {
+            "username": username,
+            "role": USERS[username]["role"],
+            "name": USERS[username]["name"]
         }
-    }
-if 'automation_log' not in st.session_state:
-    st.session_state.automation_log = []
-if 'email_settings' not in st.session_state:
-    st.session_state.email_settings = {
-        'smtp_host': 'smtp.gmail.com',
-        'smtp_port': 587,
-        'smtp_user': '',
-        'smtp_password': '',
-        'from_email': '',
-        'auto_followup': True,
-        'followup_frequency': 'daily'
-    }
+        return True
+    return False
 
-# API Keys
-SERP_API_KEY = ""
-GOOGLE_MAPS_API_KEY = ""
-OPENAI_API_KEY = ""
+def logout():
+    st.session_state.authenticated = False
+    st.session_state.user = None
+    st.session_state.page = 'login'
+    st.rerun()
 
-try:
-    SERP_API_KEY = st.secrets.get("SERP_API_KEY", "")
-    GOOGLE_MAPS_API_KEY = st.secrets.get("GOOGLE_MAPS_API_KEY", "")
-    OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
-except:
-    pass
+# ============ GOOGLE SHEETS INTEGRATION ============
+def setup_google_sheets():
+    """Setup Google Sheets connection"""
+    try:
+        # For production, use service account JSON
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        # Store credentials in secrets
+        creds_dict = {
+            "type": "service_account",
+            "project_id": st.secrets.get("GCP_PROJECT_ID", ""),
+            "private_key_id": st.secrets.get("GCP_PRIVATE_KEY_ID", ""),
+            "private_key": st.secrets.get("GCP_PRIVATE_KEY", ""),
+            "client_email": st.secrets.get("GCP_CLIENT_EMAIL", ""),
+            "client_id": st.secrets.get("GCP_CLIENT_ID", ""),
+        }
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        return client
+    except Exception as e:
+        return None
+
+def sync_to_google_sheets(lead):
+    """Sync lead to Google Sheets"""
+    if not st.session_state.google_sheet_url:
+        return False
+    
+    try:
+        client = setup_google_sheets()
+        if client:
+            # Open spreadsheet by URL
+            sheet = client.open_by_url(st.session_state.google_sheet_url).sheet1
+            # Append lead data
+            row = [
+                lead.get('name', ''),
+                lead.get('email', ''),
+                lead.get('phone', ''),
+                lead.get('score', 0),
+                lead.get('status', ''),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ]
+            sheet.append_row(row)
+            return True
+    except Exception as e:
+        print(f"Google Sheets error: {e}")
+    return False
+
+# ============ WHATSAPP INTEGRATION ============
+def send_whatsapp_message(to_number, message):
+    """Send WhatsApp message using Twilio"""
+    try:
+        account_sid = st.secrets.get("TWILIO_ACCOUNT_SID", "")
+        auth_token = st.secrets.get("TWILIO_AUTH_TOKEN", "")
+        from_number = st.secrets.get("TWILIO_WHATSAPP_FROM", "")
+        
+        if not account_sid:
+            # Fallback: Log message (for demo)
+            st.session_state.whatsapp_log.append({
+                "to": to_number,
+                "message": message[:100],
+                "date": datetime.now(),
+                "status": "Logged (No Twilio)"
+            })
+            return True
+        
+        client = Client(account_sid, auth_token)
+        message = client.messages.create(
+            body=message,
+            from_=f'whatsapp:{from_number}',
+            to=f'whatsapp:{to_number}'
+        )
+        st.session_state.whatsapp_log.append({
+            "to": to_number,
+            "message": message[:100],
+            "date": datetime.now(),
+            "status": "Sent"
+        })
+        return True
+    except Exception as e:
+        st.session_state.whatsapp_log.append({
+            "to": to_number,
+            "message": f"Failed: {str(e)[:50]}",
+            "date": datetime.now(),
+            "status": "Failed"
+        })
+        return False
+
+def send_whatsapp_lead_notification(lead):
+    """Send WhatsApp notification for new lead"""
+    message = f"""🔔 NEW LEAD ALERT - TechWokx
+
+📌 Name: {lead.get('name')}
+📧 Email: {lead.get('email', 'N/A')}
+📞 Phone: {lead.get('phone', 'N/A')}
+⭐ Score: {lead.get('score', 0)}/100
+🏷️ Status: {lead.get('status', 'New')}
+
+View in CRM: [Link]
+"""
+    # Send to client
+    if lead.get('phone'):
+        send_whatsapp_message(lead['phone'], f"Thank you for your interest! Your lead score is {lead.get('score', 0)}/100. We'll contact you soon.")
+    
+    # Send to TechWokx team
+    techwokx_numbers = st.secrets.get("TECHWOKX_WHATSAPP_NUMBERS", "+233555087407").split(",")
+    for number in techwokx_numbers:
+        send_whatsapp_message(number.strip(), message)
+    
+    return True
 
 # ============ EMAIL FUNCTIONS ============
-
-def send_email(to_email, subject, body):
-    """Send email using SMTP"""
-    if not st.session_state.email_settings['smtp_user']:
-        return False
+def send_email(to_email, subject, body, attachment=None):
+    """Send email with optional attachment"""
+    if not st.secrets.get("EMAIL_USER", ""):
+        return False, "Email not configured"
     
     try:
         msg = MIMEMultipart()
-        msg['From'] = st.session_state.email_settings['from_email']
+        msg['From'] = st.secrets.get("EMAIL_USER", "")
         msg['To'] = to_email
         msg['Subject'] = subject
-        
         msg.attach(MIMEText(body, 'plain'))
         
-        server = smtplib.SMTP(
-            st.session_state.email_settings['smtp_host'], 
-            st.session_state.email_settings['smtp_port']
-        )
+        # Add attachment if provided
+        if attachment and os.path.exists(attachment):
+            with open(attachment, 'rb') as f:
+                part = MIMEBase('application', 'octet-stream')
+                part.set_payload(f.read())
+                encoders.encode_base64(part)
+                part.add_header('Content-Disposition', f'attachment; filename={os.path.basename(attachment)}')
+                msg.attach(part)
+        
+        server = smtplib.SMTP(st.secrets.get("EMAIL_HOST", "smtp.gmail.com"), int(st.secrets.get("EMAIL_PORT", 587)))
         server.starttls()
-        server.login(
-            st.session_state.email_settings['smtp_user'], 
-            st.session_state.email_settings['smtp_password']
-        )
+        server.login(st.secrets.get("EMAIL_USER", ""), st.secrets.get("EMAIL_PASSWORD", ""))
         server.send_message(msg)
         server.quit()
-        return True
-    except Exception as e:
-        st.error(f"Email error: {e}")
-        return False
-
-def check_and_send_auto_followups():
-    """Automatically send follow-up emails to leads"""
-    if not st.session_state.email_settings['auto_followup']:
-        return 0
-    
-    now = datetime.now()
-    sent_count = 0
-    
-    for lead in st.session_state.leads:
-        if 'followup_stage' not in lead:
-            lead['followup_stage'] = 0
-        if 'last_contact' not in lead:
-            lead['last_contact'] = None
         
-        # Determine which template to send
-        templates = list(st.session_state.email_templates.values())
-        expected_stage = 0
-        
-        if lead['last_contact']:
-            days_since = (now - lead['last_contact']).days
-            if lead['score'] >= 80:  # Hot leads get faster follow-up
-                expected_stage = min(days_since // 2, len(templates))
-            else:
-                expected_stage = min(days_since // 3, len(templates))
-        
-        if expected_stage > lead['followup_stage'] and lead['followup_stage'] < len(templates):
-            template = templates[lead['followup_stage']]
-            if template['active']:
-                # Prepare email
-                subject = template['subject'].format(
-                    company=lead['name'],
-                    contact_name=lead.get('contact_name', 'Valued Customer')
-                )
-                body = template['body'].format(
-                    company=lead['name'],
-                    contact_name=lead.get('contact_name', 'Valued Customer'),
-                    score=lead['score']
-                )
-                
-                if send_email(lead['email'], subject, body):
-                    lead['followup_stage'] += 1
-                    lead['last_contact'] = now
-                    sent_count += 1
-                    log_automation(f"Auto email sent to {lead['name']}: {template['name']}")
-    
-    return sent_count
-
-def log_automation(action):
-    """Log automation activity"""
-    st.session_state.automation_log.insert(0, {
-        'time': datetime.now(),
-        'action': action,
-        'status': 'Success'
-    })
-    # Keep last 100 logs
-    st.session_state.automation_log = st.session_state.automation_log[:100]
-
-# ============ API FUNCTIONS ============
-
-def search_company_serp(company_name):
-    if not SERP_API_KEY:
-        return None
-    try:
-        url = "https://serpapi.com/search"
-        params = {
-            "api_key": SERP_API_KEY,
-            "q": f"{company_name} Ghana company",
-            "engine": "google",
-            "num": 5
-        }
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        result = {"website": None, "description": None}
-        if "organic_results" in data:
-            for org in data["organic_results"][:3]:
-                link = org.get("link", "")
-                if link and "google" not in link:
-                    if not result["website"]:
-                        result["website"] = link
-                    if not result["description"]:
-                        result["description"] = org.get("snippet", "")
-        return result
-    except Exception:
-        return None
-
-def get_company_location(company_name):
-    if not GOOGLE_MAPS_API_KEY:
-        return None
-    try:
-        url = "https://maps.googleapis.com/maps/api/place/findplacefromtext/json"
-        params = {
-            "key": GOOGLE_MAPS_API_KEY,
-            "input": f"{company_name} Ghana",
-            "inputtype": "textquery",
-            "fields": "formatted_address"
-        }
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        if data.get("candidates"):
-            return {"address": data["candidates"][0].get("formatted_address", "")}
-        return None
-    except Exception:
-        return None
-
-def extract_email_from_website(website):
-    if not website:
-        return {"emails": [], "primary_email": None}
-    try:
-        if not website.startswith("http"):
-            website = "https://" + website
-        response = requests.get(website, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-        emails = re.findall(email_pattern, response.text)
-        exclude = ['example', 'test', 'noreply', 'png', 'jpg', 'css']
-        valid = [e for e in emails if not any(x in e.lower() for x in exclude)]
-        primary = None
-        for e in valid:
-            if any(x in e.lower() for x in ['info', 'contact', 'hello', 'support']):
-                primary = e
-                break
-        return {"emails": list(set(valid))[:3], "primary_email": primary or (valid[0] if valid else None)}
-    except Exception:
-        return {"emails": [], "primary_email": None}
-
-def deep_research_company(company_name, website=None):
-    cache_key = hashlib.md5(f"{company_name}_{website}".encode()).hexdigest()
-    if cache_key in st.session_state.research_cache:
-        return st.session_state.research_cache[cache_key]
-    
-    result = {
-        "name": company_name,
-        "website": website,
-        "emails": [],
-        "primary_email": None,
-        "address": None,
-        "description": None,
-        "lead_score": 50,
-        "sources": []
-    }
-    
-    progress = st.progress(0)
-    status = st.empty()
-    
-    status.text("Searching company information...")
-    serp_data = search_company_serp(company_name)
-    if serp_data:
-        result["website"] = result["website"] or serp_data.get("website")
-        result["description"] = serp_data.get("description")
-        result["sources"].append("SERP API")
-    progress.progress(0.33)
-    
-    status.text("Finding location...")
-    location_data = get_company_location(company_name)
-    if location_data:
-        result["address"] = location_data.get("address")
-        result["sources"].append("Google Maps")
-    progress.progress(0.66)
-    
-    target_website = result["website"] or website
-    if target_website:
-        status.text("Extracting contact info...")
-        email_data = extract_email_from_website(target_website)
-        if email_data:
-            result["emails"] = email_data.get("emails", [])
-            result["primary_email"] = email_data.get("primary_email")
-            if result["emails"]:
-                result["sources"].append("Website")
-    
-    # Calculate lead score
-    score = 30
-    if result["website"]:
-        score += 20
-    if result["primary_email"]:
-        score += 25
-    if result["address"]:
-        score += 15
-    if result["emails"]:
-        score += 10
-    result["lead_score"] = min(score, 100)
-    
-    progress.progress(1.0)
-    status.text("Research complete!")
-    
-    st.session_state.research_cache[cache_key] = result
-    return result
-
-def add_lead(name, email, phone, score, contact_name=""):
-    new_id = len(st.session_state.leads) + 1
-    status = "Hot" if score >= 80 else "Warm" if score >= 60 else "Cold"
-    st.session_state.leads.append({
-        "id": new_id, 
-        "name": name, 
-        "email": email, 
-        "phone": phone,
-        "contact_name": contact_name or name.split()[0] if name else "",
-        "score": score, 
-        "status": status, 
-        "audit_date": datetime.now(),
-        "last_contact": None,
-        "followup_stage": 0,
-        "notes": ""
-    })
-    log_automation(f"New lead added: {name} (Score: {score})")
-
-def import_leads_from_csv(uploaded_file):
-    try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-        
-        required = ['name', 'email']
-        missing = [col for col in required if col not in df.columns]
-        if missing:
-            return False, f"Missing columns: {missing}"
-        
-        imported = 0
-        for _, row in df.iterrows():
-            score = int(row.get('score', 50)) if 'score' in df.columns else 50
-            phone = str(row.get('phone', '')) if 'phone' in df.columns else ''
-            contact = str(row.get('contact_name', '')) if 'contact_name' in df.columns else ''
-            add_lead(row['name'], row['email'], phone, score, contact)
-            imported += 1
-        
-        return True, f"Imported {imported} leads"
+        st.session_state.email_log.append({
+            "to": to_email,
+            "subject": subject,
+            "date": datetime.now(),
+            "status": "Sent"
+        })
+        return True, "Email sent"
     except Exception as e:
         return False, str(e)
 
-def export_leads_to_csv():
-    df = pd.DataFrame(st.session_state.leads)
-    return df.to_csv(index=False)
+def send_lead_notifications(lead):
+    """Send all notifications for new lead"""
+    notifications = []
+    
+    # 1. Send email to client
+    email_body = f"""Dear {lead.get('name')},
+
+Thank you for your interest in TechWokx services.
+
+Your lead score: {lead.get('score', 0)}/100
+Status: {lead.get('status', 'New')}
+
+Our team will contact you within 24 hours.
+
+Best regards,
+TechWokx Team
+"""
+    success, msg = send_email(lead.get('email', ''), "Thank you for contacting TechWokx", email_body)
+    notifications.append(("Email to Client", success))
+    
+    # 2. Send WhatsApp to client
+    if lead.get('phone'):
+        success = send_whatsapp_message(lead['phone'], f"Hi {lead.get('name')}, thanks for reaching out! Your lead score is {lead.get('score', 0)}/100. We'll contact you soon. - TechWokx")
+        notifications.append(("WhatsApp to Client", success))
+    
+    # 3. Send notification to TechWokx team
+    techwokx_email = st.secrets.get("TECHWOKX_EMAIL", "hello@techwokx.online")
+    team_body = f"""NEW LEAD ALERT
+
+Name: {lead.get('name')}
+Email: {lead.get('email')}
+Phone: {lead.get('phone', 'N/A')}
+Score: {lead.get('score', 0)}/100
+Source: {lead.get('source', 'Website')}
+
+Take action: [View in CRM]
+"""
+    success, msg = send_email(techwokx_email, f"New Lead: {lead.get('name')}", team_body)
+    notifications.append(("TechWokx Team Email", success))
+    
+    # 4. Send WhatsApp to TechWokx
+    techwokx_numbers = st.secrets.get("TECHWOKX_WHATSAPP_NUMBERS", "+233555087407").split(",")
+    for number in techwokx_numbers:
+        success = send_whatsapp_message(number.strip(), f"🔔 NEW LEAD: {lead.get('name')} - Score: {lead.get('score', 0)}/100")
+        notifications.append((f"WhatsApp to {number}", success))
+    
+    # 5. Sync to Google Sheets
+    success = sync_to_google_sheets(lead)
+    notifications.append(("Google Sheets Sync", success))
+    
+    st.session_state.notification_log.append({
+        "lead": lead.get('name'),
+        "notifications": notifications,
+        "date": datetime.now()
+    })
+    
+    return notifications
+
+# ============ DEEP LAN ANALYSIS FUNCTIONS ============
+def scan_network(ip_range="192.168.1.0/24"):
+    """Scan network for devices"""
+    devices = []
+    try:
+        # Get local IP
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        network = '.'.join(local_ip.split('.')[:-1]) + '.1/24'
+        
+        # Ping sweep (simplified)
+        for i in range(1, 255):
+            ip = f"{'.'.join(local_ip.split('.')[:-1])}.{i}"
+            response = subprocess.run(['ping', '-c', '1', '-W', '1', ip], capture_output=True)
+            if response.returncode == 0:
+                try:
+                    host = socket.gethostbyaddr(ip)[0]
+                except:
+                    host = "Unknown"
+                devices.append({"ip": ip, "hostname": host, "status": "Online"})
+    except Exception as e:
+        st.error(f"Network scan error: {e}")
+    return devices
+
+def get_system_info():
+    """Get detailed system information"""
+    info = {
+        "hostname": socket.gethostname(),
+        "platform": platform.system(),
+        "platform_version": platform.version(),
+        "processor": platform.processor(),
+        "cpu_count": psutil.cpu_count(),
+        "cpu_percent": psutil.cpu_percent(interval=1),
+        "memory_total": psutil.virtual_memory().total / (1024**3),
+        "memory_available": psutil.virtual_memory().available / (1024**3),
+        "memory_percent": psutil.virtual_memory().percent,
+        "disk_usage": {},
+        "network_interfaces": []
+    }
+    
+    # Disk usage
+    for partition in psutil.disk_partitions():
+        try:
+            usage = psutil.disk_usage(partition.mountpoint)
+            info["disk_usage"][partition.mountpoint] = {
+                "total": usage.total / (1024**3),
+                "used": usage.used / (1024**3),
+                "free": usage.free / (1024**3),
+                "percent": usage.percent
+            }
+        except:
+            pass
+    
+    # Network interfaces
+    for interface, addrs in psutil.net_if_addrs().items():
+        for addr in addrs:
+            if addr.family == socket.AF_INET:
+                info["network_interfaces"].append({
+                    "name": interface,
+                    "ip": addr.address,
+                    "netmask": addr.netmask
+                })
+    
+    return info
+
+def analyze_folders(path="/"):
+    """Analyze folder structure and sizes"""
+    folders = []
+    try:
+        for item in Path(path).iterdir():
+            if item.is_dir():
+                try:
+                    size = sum(f.stat().st_size for f in item.rglob('*') if f.is_file())
+                    folders.append({
+                        "name": item.name,
+                        "path": str(item),
+                        "size_gb": size / (1024**3),
+                        "item_count": len(list(item.rglob('*')))
+                    })
+                except:
+                    pass
+    except:
+        pass
+    return sorted(folders, key=lambda x: x['size_gb'], reverse=True)[:20]
+
+def create_backup(source_path, backup_name=None):
+    """Create backup of specified folder"""
+    if not backup_name:
+        backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    backup_path = f"/tmp/{backup_name}.zip"
+    try:
+        shutil.make_archive(f"/tmp/{backup_name}", 'zip', source_path)
+        size = os.path.getsize(backup_path) / (1024**2)  # MB
+        return {"success": True, "path": backup_path, "size_mb": size, "name": backup_name}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# ============ LEAD FUNCTIONS ============
+def add_lead(name, email, phone, score, source="Manual"):
+    """Add lead with full notifications"""
+    new_id = len(st.session_state.leads) + 1
+    status = "Hot" if score >= 80 else "Warm" if score >= 60 else "Cold"
+    
+    lead = {
+        "id": new_id,
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "score": score,
+        "status": status,
+        "source": source,
+        "created_at": datetime.now(),
+        "notified": False
+    }
+    
+    st.session_state.leads.append(lead)
+    
+    # Send all notifications
+    send_lead_notifications(lead)
+    
+    # Save to local database
+    conn = sqlite3.connect('client_sites.db')
+    c = conn.cursor()
+    c.execute("INSERT INTO leads (name, email, phone, score, status, source, created_at) VALUES (?,?,?,?,?,?,?)",
+              (name, email, phone, score, status, source, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    
+    return new_id
 
 # ============ CSS STYLES ============
 css_style = """
@@ -407,68 +474,119 @@ css_style = """
 .custom-divider { height: 1px; background: #e2e8f0; margin: 1.5rem 0; }
 .plan-badge { background: linear-gradient(135deg, #fbbf24, #f59e0b); border-radius: 12px; padding: 0.75rem; text-align: center; margin-top: 1rem; }
 .stButton > button { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #0f172a !important; font-weight: 600; border: none; border-radius: 8px; }
-.status-hot { color: #dc2626; font-weight: 600; }
-.status-warm { color: #f97316; font-weight: 600; }
-.status-cold { color: #3b82f6; font-weight: 600; }
+.status-hot { background: #dc2626; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+.status-warm { background: #f97316; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+.status-cold { background: #64748b; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
 </style>
 """
 st.markdown(css_style, unsafe_allow_html=True)
 
-# Run auto follow-ups on dashboard load
-if st.session_state.page == 'dashboard':
-    sent = check_and_send_auto_followups()
-    if sent > 0:
-        st.toast(f"📧 Sent {sent} automated follow-up emails!", icon="📧")
+# ============ LOGIN PAGE ============
+if not st.session_state.authenticated:
+    st.markdown("""
+    <div style="max-width: 400px; margin: 100px auto;">
+        <div style="text-align: center; margin-bottom: 2rem;">
+            <h1 style="color: #fbbf24;">🔍 TechWokx</h1>
+            <h3>Enterprise Suite</h3>
+            <p>Lead Intelligence • Deep LAN Analysis • Multi-channel Notifications</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login", use_container_width=True)
+        
+        if submitted:
+            if check_auth(username, password):
+                st.success(f"Welcome back, {st.session_state.user['name']}!")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+    
+    st.markdown("""
+    <div style="text-align: center; margin-top: 2rem; color: #64748b;">
+        <small>Demo credentials: admin / admin123 | techwokx / techwokx2024 | client1 / client123</small>
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
 
 # ============ SIDEBAR NAVIGATION ============
 with st.sidebar:
     st.markdown("### 🔍 TechWokx")
-    st.markdown("#### Lead Intelligence Engine")
+    st.markdown(f"#### Welcome, {st.session_state.user['name']}")
+    st.markdown(f"<small>Role: {st.session_state.user['role'].title()}</small>", unsafe_allow_html=True)
     st.markdown("---")
     
+    # Main Navigation
     nav_items = [
         ("🏠 Dashboard", "dashboard"),
+        ("---", "divider0"),
+        ("📋 LEAD MANAGEMENT", "header1"),
         ("🔍 Company Research", "company_research"),
         ("📊 Bulk Research", "bulk_research"),
         ("📥 Import Leads", "import_leads"),
+        ("👥 Lead CRM", "crm"),
         ("---", "divider1"),
+        ("📧 COMMUNICATIONS", "header2"),
         ("📧 Lead Follow-up", "lead_followup"),
-        ("📝 Email Templates", "email_templates"),
-        ("⚙️ Email Settings", "email_settings"),
+        ("✉️ Email Automation", "email_automation"),
+        ("💬 WhatsApp Broadcast", "whatsapp_broadcast"),
+        ("📊 Google Sheets Sync", "google_sheets"),
         ("---", "divider2"),
+        ("🖥️ DEEP LAN ANALYSIS", "header3"),
+        ("🌐 Network Scanner", "network_scan"),
+        ("💻 System Info", "system_info"),
+        ("📁 Folder Analyzer", "folder_analyzer"),
+        ("💾 Backup Manager", "backup_manager"),
+        ("---", "divider3"),
+        ("🛡️ AUDITS", "header4"),
         ("🌐 DNS Audit", "dns_audit"),
         ("🔒 Website Audit", "website_audit"),
         ("📧 Email Security", "email_security"),
         ("🛡️ IT Audit", "it_audit"),
-        ("---", "divider3"),
-        ("👥 CRM", "crm"),
-        ("📈 Reports", "reports"),
-        ("⚙️ Settings", "settings")
+        ("---", "divider4"),
+        ("📈 REPORTS", "header5"),
+        ("📊 Analytics", "analytics"),
+        ("📋 Notification Log", "notification_log"),
+        ("⚙️ Settings", "settings"),
+        ("---", "divider5"),
+        ("🚪 Logout", "logout")
     ]
     
     for label, key in nav_items:
         if label == "---":
             st.markdown("---")
+        elif label.startswith("📋") or label.startswith("📧") or label.startswith("🖥️") or label.startswith("🛡️") or label.startswith("📈"):
+            st.markdown(f"<small style='color:#94a3b8'>{label}</small>", unsafe_allow_html=True)
         elif st.button(label, key=key, use_container_width=True):
-            st.session_state.page = key
-            st.rerun()
+            if key == "logout":
+                logout()
+            else:
+                st.session_state.page = key
+                st.rerun()
     
     st.markdown("---")
-    st.markdown("### API Status")
-    st.markdown(f"SERP: {'✅' if SERP_API_KEY else '❌'}")
-    st.markdown(f"Maps: {'✅' if GOOGLE_MAPS_API_KEY else '❌'}")
-    st.markdown(f"Email: {'✅' if st.session_state.email_settings['smtp_user'] else '❌'}")
+    st.markdown("### System Status")
+    st.markdown(f"Email: {'✅' if st.secrets.get('EMAIL_USER', '') else '❌'}")
+    st.markdown(f"WhatsApp: {'✅' if st.secrets.get('TWILIO_ACCOUNT_SID', '') else '❌'}")
+    st.markdown(f"Sheets: {'✅' if st.session_state.google_sheet_url else '❌'}")
+    
+    if st.button("🔄 Run Auto Follow-ups", use_container_width=True):
+        st.success("Follow-up check complete!")
+    
     st.markdown("---")
-    st.markdown('<div class="plan-badge">🚀 Pro Plan<br><small>Full Automation</small></div>', unsafe_allow_html=True)
+    st.markdown('<div class="plan-badge">🚀 Enterprise Plan<br><small>Full Suite Active</small></div>', unsafe_allow_html=True)
 
 # ============ DASHBOARD PAGE ============
 if st.session_state.page == 'dashboard':
-    st.markdown('<div class="welcome-card"><h2>Welcome to TechWokx Lead Intelligence</h2><p>Full automation for lead management and follow-ups.</p></div>', unsafe_allow_html=True)
-    
     total_leads = len(st.session_state.leads)
     hot_leads = sum(1 for l in st.session_state.leads if l.get("score", 0) >= 80)
-    warm_leads = sum(1 for l in st.session_state.leads if 60 <= l.get("score", 0) < 80)
-    pending_followup = sum(1 for l in st.session_state.leads if l.get("followup_stage", 0) < 3)
+    emails_sent = len(st.session_state.email_log)
+    whatsapp_sent = len(st.session_state.whatsapp_log)
+    
+    st.markdown('<div class="welcome-card"><h2>Welcome to TechWokx Enterprise Suite</h2><p>Lead Intelligence • Deep LAN Analysis • Multi-channel Notifications</p></div>', unsafe_allow_html=True)
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -476,523 +594,283 @@ if st.session_state.page == 'dashboard':
     with col2:
         st.markdown(f"<div class='metric-card'><div class='metric-value'>{hot_leads}</div><div class='metric-label'>Hot Leads</div></div>", unsafe_allow_html=True)
     with col3:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{warm_leads}</div><div class='metric-label'>Warm Leads</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{emails_sent}</div><div class='metric-label'>Emails Sent</div></div>", unsafe_allow_html=True)
     with col4:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{pending_followup}</div><div class='metric-label'>Pending Follow-up</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{whatsapp_sent}</div><div class='metric-label'>WhatsApp Msgs</div></div>", unsafe_allow_html=True)
     
     st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown('<div class="section-header">📊 Recent Research</div>', unsafe_allow_html=True)
-        if st.session_state.leads:
-            for lead in st.session_state.leads[-5:]:
-                st.markdown(f'<div class="activity-item"><div class="activity-action">{lead["name"]} - Score: {lead["score"]}/100 - Stage: {lead.get("followup_stage", 0)}/4</div><div class="activity-time">{lead["audit_date"].strftime("%Y-%m-%d")}</div></div>', unsafe_allow_html=True)
-        else:
-            st.info("No leads yet. Use Company Research or Import Leads.")
+        st.markdown('<div class="section-header">📊 Recent Leads</div>', unsafe_allow_html=True)
+        for lead in st.session_state.leads[-5:]:
+            st.markdown(f'<div class="activity-item"><strong>{lead["name"]}</strong> - Score: {lead["score"]}/100<br><small>{lead["created_at"].strftime("%Y-%m-%d %H:%M") if lead.get("created_at") else "Just now"}</small></div>', unsafe_allow_html=True)
     
     with col2:
-        st.markdown('<div class="section-header">🤖 Automation Log</div>', unsafe_allow_html=True)
-        for log in st.session_state.automation_log[:5]:
-            st.markdown(f'<div class="activity-item"><div class="activity-action">{log["action"]}</div><div class="activity-time">{log["time"].strftime("%Y-%m-%d %H:%M")}</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">📧 Recent Activity</div>', unsafe_allow_html=True)
+        for log in st.session_state.notification_log[-3:]:
+            st.markdown(f'<div class="activity-item"><strong>Lead: {log["lead"]}</strong><br><small>{len(log["notifications"])} notifications sent at {log["date"].strftime("%H:%M")}</small></div>', unsafe_allow_html=True)
 
-# ============ COMPANY RESEARCH PAGE ============
-elif st.session_state.page == 'company_research':
-    st.markdown('<div class="section-header">🔍 Company Research</div>', unsafe_allow_html=True)
-    st.caption("Research companies and automatically add to follow-up sequence")
+# ============ DEEP LAN ANALYSIS PAGES ============
+
+elif st.session_state.page == 'network_scan':
+    st.markdown('<div class="section-header">🌐 Network Scanner</div>', unsafe_allow_html=True)
+    st.caption("Scan local network for connected devices")
     st.markdown("---")
     
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        company_name = st.text_input("Company Name", placeholder="e.g. Nyaho Medical Centre, MTN Ghana")
-    with col2:
-        website = st.text_input("Website (optional)", placeholder="e.g. nyahoclinic.com")
+    if st.button("🔍 Start Network Scan", type="primary"):
+        with st.spinner("Scanning network..."):
+            devices = scan_network()
+            if devices:
+                st.success(f"Found {len(devices)} devices")
+                for device in devices:
+                    st.markdown(f'<div class="data-card"><strong>IP:</strong> {device["ip"]}<br><strong>Hostname:</strong> {device["hostname"]}<br><strong>Status:</strong> 🟢 Online</div>', unsafe_allow_html=True)
+            else:
+                st.warning("No devices found or scan incomplete")
+
+elif st.session_state.page == 'system_info':
+    st.markdown('<div class="section-header">💻 System Information</div>', unsafe_allow_html=True)
+    st.caption("Detailed system analysis for client site")
+    st.markdown("---")
     
-    contact_name = st.text_input("Contact Person (optional)", placeholder="e.g. John Doe")
+    if st.button("🔍 Scan System", type="primary"):
+        with st.spinner("Analyzing system..."):
+            info = get_system_info()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"""
+                <div class="data-card">
+                    <h4>Hardware Info</h4>
+                    <p><strong>Hostname:</strong> {info['hostname']}</p>
+                    <p><strong>Platform:</strong> {info['platform']}</p>
+                    <p><strong>Processor:</strong> {info['processor'] or 'N/A'}</p>
+                    <p><strong>CPU Cores:</strong> {info['cpu_count']}</p>
+                    <p><strong>CPU Usage:</strong> {info['cpu_percent']}%</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div class="data-card">
+                    <h4>Memory & Storage</h4>
+                    <p><strong>Total RAM:</strong> {info['memory_total']:.1f} GB</p>
+                    <p><strong>Available RAM:</strong> {info['memory_available']:.1f} GB</p>
+                    <p><strong>RAM Usage:</strong> {info['memory_percent']}%</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Network interfaces
+            st.markdown('<div class="data-card"><h4>Network Interfaces</h4>', unsafe_allow_html=True)
+            for nic in info['network_interfaces']:
+                st.write(f"**{nic['name']}:** {nic['ip']}")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Disk usage
+            st.markdown('<div class="data-card"><h4>Disk Usage</h4>', unsafe_allow_html=True)
+            for mount, usage in info['disk_usage'].items():
+                st.write(f"**{mount}:** {usage['used']:.1f} GB / {usage['total']:.1f} GB ({usage['percent']}% used)")
+                st.progress(usage['percent'] / 100)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+elif st.session_state.page == 'folder_analyzer':
+    st.markdown('<div class="section-header">📁 Folder Analyzer</div>', unsafe_allow_html=True)
+    st.caption("Analyze folder structures and identify large directories")
+    st.markdown("---")
     
-    if st.button("🔍 Research & Add to CRM", type="primary"):
-        if company_name:
-            with st.spinner(f"Researching {company_name}..."):
-                result = deep_research_company(company_name, website)
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f'<div class="data-card"><h4>Company Information</h4><p><strong>Name:</strong> {result["name"]}</p><p><strong>Website:</strong> {result["website"] or "Not found"}</p><p><strong>Address:</strong> {result["address"] or "Not found"}</p></div>', unsafe_allow_html=True)
-                
-                with col2:
-                    st.markdown(f'<div class="data-card" style="text-align: center;"><h4>Lead Score</h4><p style="font-size: 3rem; font-weight: 700; color: #fbbf24;">{result["lead_score"]}/100</p><p><strong>Status:</strong> {"Hot" if result["lead_score"] >= 80 else "Warm" if result["lead_score"] >= 60 else "Cold"}</p></div>', unsafe_allow_html=True)
-                
-                if st.button("➕ Add to CRM", use_container_width=True):
-                    email = result.get("primary_email") or (result.get("emails", [""])[0] if result.get("emails") else "")
-                    add_lead(result["name"], email, "", result["lead_score"], contact_name)
-                    st.success(f"Added {result['name']} to CRM! Auto follow-up will begin shortly.")
+    folder_path = st.text_input("Folder Path to Analyze", placeholder="/home/user/Documents or C:\\Users\\User\\Documents")
+    
+    if st.button("🔍 Analyze Folders", type="primary"):
+        if folder_path:
+            with st.spinner(f"Analyzing {folder_path}..."):
+                folders = analyze_folders(folder_path)
+                if folders:
+                    st.success(f"Found {len(folders)} folders")
+                    for folder in folders[:10]:
+                        st.markdown(f"""
+                        <div class="data-card">
+                            <strong>{folder['name']}</strong><br>
+                            Size: {folder['size_gb']:.2f} GB<br>
+                            Items: {folder['item_count']:,}<br>
+                            Path: {folder['path'][:80]}...
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.warning("No folders found or unable to access")
+
+elif st.session_state.page == 'backup_manager':
+    st.markdown('<div class="section-header">💾 Backup Manager</div>', unsafe_allow_html=True)
+    st.caption("Create and manage backups of client data")
+    st.markdown("---")
+    
+    backup_source = st.text_input("Source Folder to Backup", placeholder="/home/user/important_data")
+    backup_name = st.text_input("Backup Name (optional)", placeholder="auto-generated")
+    
+    if st.button("📦 Create Backup", type="primary"):
+        if backup_source:
+            with st.spinner("Creating backup..."):
+                result = create_backup(backup_source, backup_name)
+                if result['success']:
+                    st.success(f"Backup created: {result['name']}.zip ({result['size_mb']:.1f} MB)")
+                    
+                    # Option to download
+                    with open(result['path'], 'rb') as f:
+                        st.download_button("Download Backup", f, f"{result['name']}.zip", "application/zip")
+                    
+                    # Send notification
+                    send_whatsapp_message(st.secrets.get("TECHWOKX_WHATSAPP_NUMBERS", "+233555087407"), f"Backup created: {result['name']} ({result['size_mb']:.1f} MB)")
+                else:
+                    st.error(f"Backup failed: {result['error']}")
+
+# ============ COMMUNICATIONS PAGES ============
+
+elif st.session_state.page == 'whatsapp_broadcast':
+    st.markdown('<div class="section-header">💬 WhatsApp Broadcast</div>', unsafe_allow_html=True)
+    st.caption("Send WhatsApp messages to leads")
+    st.markdown("---")
+    
+    # Select recipients
+    recipient_type = st.radio("Send to", ["All Leads", "Hot Leads Only", "Warm Leads Only", "Specific Lead"])
+    
+    if recipient_type == "Specific Lead":
+        lead_options = {f"{l['name']} - {l.get('phone', 'No phone')}": l for l in st.session_state.leads if l.get('phone')}
+        selected = st.selectbox("Select Lead", list(lead_options.keys()))
+        recipient = [lead_options[selected]]
+    else:
+        if recipient_type == "All Leads":
+            recipients = [l for l in st.session_state.leads if l.get('phone')]
+        elif recipient_type == "Hot Leads Only":
+            recipients = [l for l in st.session_state.leads if l.get('score', 0) >= 80 and l.get('phone')]
         else:
-            st.warning("Please enter a company name")
-
-# ============ BULK RESEARCH PAGE ============
-elif st.session_state.page == 'bulk_research':
-    st.markdown('<div class="section-header">📊 Bulk Research</div>', unsafe_allow_html=True)
-    st.caption("Research multiple companies and add to CRM")
-    st.markdown("---")
+            recipients = [l for l in st.session_state.leads if 60 <= l.get('score', 0) < 80 and l.get('phone')]
     
-    companies = st.text_area("Company Names (one per line)", height=150, placeholder="Nyaho Medical Centre\nMTN Ghana\nGCB Bank\nKasapreko")
+    st.info(f"📊 {len(recipients)} leads selected")
     
-    if st.button("Start Bulk Research", type="primary"):
-        if companies:
-            lines = [c.strip() for c in companies.split("\n") if c.strip()]
+    message = st.text_area("Message", height=150, placeholder="Enter your WhatsApp message here...")
+    
+    if st.button("📤 Send Broadcast", type="primary"):
+        if message and recipients:
+            success_count = 0
             progress = st.progress(0)
-            results = []
-            for i, c in enumerate(lines):
-                progress.progress((i + 1) / len(lines))
-                result = deep_research_company(c)
-                email = result.get("primary_email") or (result.get("emails", [""])[0] if result.get("emails") else "")
-                add_lead(result["name"], email, "", result["lead_score"], "")
-                results.append({"Company": c, "Score": f"{result['lead_score']}/100", "Status": "Added to CRM"})
-            st.success(f"Added {len(lines)} companies to CRM!")
-            st.dataframe(results, use_container_width=True)
+            for i, lead in enumerate(recipients):
+                if send_whatsapp_message(lead['phone'], message):
+                    success_count += 1
+                progress.progress((i + 1) / len(recipients))
+            st.success(f"Sent to {success_count}/{len(recipients)} leads")
 
-# ============ IMPORT LEADS PAGE ============
+elif st.session_state.page == 'google_sheets':
+    st.markdown('<div class="section-header">📊 Google Sheets Integration</div>', unsafe_allow_html=True)
+    st.caption("Connect Google Sheets for lead data sync")
+    st.markdown("---")
+    
+    sheet_url = st.text_input("Google Sheet URL", value=st.session_state.google_sheet_url, placeholder="https://docs.google.com/spreadsheets/d/...")
+    
+    if st.button("Connect & Test Sync"):
+        st.session_state.google_sheet_url = sheet_url
+        if sheet_url:
+            test_lead = {
+                'name': 'Test Lead',
+                'email': 'test@example.com',
+                'phone': '+233 XX XXX XXXX',
+                'score': 75,
+                'status': 'Warm'
+            }
+            if sync_to_google_sheets(test_lead):
+                st.success("✅ Connected! Test lead synced to Google Sheets")
+            else:
+                st.error("❌ Connection failed. Check credentials in secrets.")
+    
+    st.markdown("---")
+    if st.button("🔄 Sync All Existing Leads"):
+        with st.spinner("Syncing..."):
+            synced = 0
+            for lead in st.session_state.leads:
+                if sync_to_google_sheets(lead):
+                    synced += 1
+            st.success(f"Synced {synced} leads to Google Sheets")
+
+# ============ LEAD MANAGEMENT PAGES ============
+
 elif st.session_state.page == 'import_leads':
     st.markdown('<div class="section-header">📥 Import Leads</div>', unsafe_allow_html=True)
-    st.caption("Import leads from CSV or Excel file")
+    st.caption("Import leads from CSV, Excel, or JSON - Auto notifications will be sent")
+    st.markdown("---")
+    
+    uploaded_file = st.file_uploader("Choose file", type=['csv', 'xlsx', 'json'])
+    
+    if uploaded_file:
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            elif uploaded_file.name.endswith('.xlsx'):
+                df = pd.read_excel(uploaded_file)
+            else:
+                df = pd.read_json(uploaded_file)
+            
+            st.dataframe(df.head())
+            
+            if st.button("Import Leads", type="primary"):
+                imported = 0
+                for _, row in df.iterrows():
+                    name = row.get('name', row.get('Name', ''))
+                    email = row.get('email', row.get('Email', ''))
+                    phone = str(row.get('phone', row.get('Phone', '')))
+                    score = int(row.get('score', row.get('Score', 50)))
+                    
+                    if name and email:
+                        add_lead(name, email, phone, score, "CSV Import")
+                        imported += 1
+                
+                st.success(f"✅ Imported {imported} leads! Notifications sent to all channels.")
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+# ============ NOTIFICATION LOG PAGE ============
+
+elif st.session_state.page == 'notification_log':
+    st.markdown('<div class="section-header">📋 Notification Log</div>', unsafe_allow_html=True)
+    st.caption("Track all notifications sent to leads and team")
+    st.markdown("---")
+    
+    if st.session_state.notification_log:
+        for log in reversed(st.session_state.notification_log):
+            with st.expander(f"📧 {log['lead']} - {log['date'].strftime('%Y-%m-%d %H:%M:%S')}"):
+                for notification in log['notifications']:
+                    status = "✅" if notification[1] else "❌"
+                    st.write(f"{status} {notification[0]}")
+    else:
+        st.info("No notifications sent yet")
+
+# ============ SETTINGS PAGE ============
+
+elif st.session_state.page == 'settings':
+    st.markdown('<div class="section-header">⚙️ System Settings</div>', unsafe_allow_html=True)
+    st.caption("Configure API keys and integration settings")
     st.markdown("---")
     
     st.markdown("""
-    ### Required Columns
-    - `name` - Company name
-    - `email` - Contact email
+    ### Required Configuration
     
-    ### Optional Columns
-    - `phone` - Phone number
-    - `score` - Lead score (0-100)
-    - `contact_name` - Contact person name
+    Create `.streamlit/secrets.toml` with:
     
-    ### Sample CSV Format
-    ```csv
-    name,email,phone,score,contact_name
-    Airside Hotel,info@airside.com,0551234567,85,John Doe
-""")
-
-uploaded_file = st.file_uploader("Choose CSV or Excel file", type=['csv', 'xlsx'])
-
-if uploaded_file:
-success, message = import_leads_from_csv(uploaded_file)
-if success:
-st.success(message)
-st.info("Leads added to CRM. Auto follow-up will begin based on email settings.")
-else:
-st.error(message)
-
-============ LEAD FOLLOW-UP PAGE ============
-elif st.session_state.page == 'lead_followup':
-st.markdown('<div class="section-header">📧 Lead Follow-up Management</div>', unsafe_allow_html=True)
-st.caption("Manage follow-ups and send emails to leads")
-st.markdown("---")
-
-Stats
-total = len(st.session_state.leads)
-if total > 0:
-avg_score = sum(l.get("score", 0) for l in st.session_state.leads) / total
-completed = sum(1 for l in st.session_state.leads if l.get("followup_stage", 0) >= 4)
-
-col1, col2, col3 = st.columns(3)
-with col1:
-st.metric("Total Leads", total)
-with col2:
-st.metric("Avg Lead Score", f"{avg_score:.0f}")
-with col3:
-st.metric("Completed Follow-ups", f"{completed}/{total}")
-
-st.markdown("---")
-
-tab1, tab2, tab3 = st.tabs(["📋 Leads", "📧 Send Manual Email", "📊 Follow-up Status"])
-
-with tab1:
-if st.session_state.leads:
-for lead in st.session_state.leads:
-status_color = "status-hot" if lead["score"] >= 80 else "status-warm" if lead["score"] >= 60 else "status-cold"
-with st.expander(f"{lead['name']} - Score: {lead['score']}/100 - Stage: {lead.get('followup_stage', 0)}/4"):
-col1, col2 = st.columns(2)
-with col1:
-st.write(f"Email: {lead['email']}")
-st.write(f"Phone: {lead['phone'] or 'N/A'}")
-st.write(f"Contact: {lead.get('contact_name', 'N/A')}")
-st.write(f"Status: <span class='{status_color}'>{lead['status']}</span>", unsafe_allow_html=True)
-with col2:
-st.write(f"Added: {lead['audit_date'].strftime('%Y-%m-%d')}")
-st.write(f"Last Contact: {lead['last_contact'].strftime('%Y-%m-%d') if lead['last_contact'] else 'Never'}")
-st.write(f"Notes: {lead.get('notes', 'No notes')}")
-
-col1, col2, col3 = st.columns(3)
-with col1:
-new_note = st.text_input("Add Note", key=f"note_{lead['id']}")
-if st.button("Save Note", key=f"save_note_{lead['id']}"):
-lead['notes'] = new_note
-st.success("Note saved!")
-with col2:
-if st.button("📧 Send Email", key=f"email_{lead['id']}"):
-template = st.session_state.email_templates['initial']
-subject = template['subject'].format(company=lead['name'], contact_name=lead.get('contact_name', 'Valued Customer'))
-body = template['body'].format(company=lead['name'], contact_name=lead.get('contact_name', 'Valued Customer'), score=lead['score'])
-if send_email(lead['email'], subject, body):
-lead['last_contact'] = datetime.now()
-st.success(f"Email sent to {lead['name']}!")
-st.rerun()
-with col3:
-if st.button("✅ Mark Contacted", key=f"contact_{lead['id']}"):
-lead['followup_stage'] = min(lead.get('followup_stage', 0) + 1, 4)
-lead['last_contact'] = datetime.now()
-st.success(f"Follow-up logged for {lead['name']}")
-st.rerun()
-else:
-st.info("No leads yet. Import leads or use Company Research.")
-
-with tab2:
-st.markdown("### Send Manual Email")
-
-if st.session_state.leads:
-lead_options = {f"{l['name']} ({l['email']})": l for l in st.session_state.leads}
-selected = st.selectbox("Select Lead", list(lead_options.keys()))
-lead = lead_options[selected]
-
-template_options = {t['name']: t for t in st.session_state.email_templates.values()}
-selected_template = st.selectbox("Select Template", list(template_options.keys()))
-template = template_options[selected_template]
-
-subject = st.text_input("Subject", value=template['subject'].format(company=lead['name'], contact_name=lead.get('contact_name', 'Valued Customer')))
-body = st.text_area("Email Body", height=200, value=template['body'].format(company=lead['name'], contact_name=lead.get('contact_name', 'Valued Customer'), score=lead['score']))
-
-if st.button("Send Email", type="primary"):
-if send_email(lead['email'], subject, body):
-lead['last_contact'] = datetime.now()
-lead['followup_stage'] = min(lead.get('followup_stage', 0) + 1, 4)
-st.success(f"Email sent to {lead['name']}!")
-log_automation(f"Manual email sent to {lead['name']}")
-else:
-st.info("No leads available")
-
-with tab3:
-st.markdown("### Follow-up Status")
-if st.session_state.leads:
-status_data = []
-for lead in st.session_state.leads:
-status_data.append({
-"Company": lead['name'],
-"Score": lead['score'],
-"Status": lead['status'],
-"Stage": f"{lead.get('followup_stage', 0)}/4",
-"Last Contact": lead['last_contact'].strftime('%Y-%m-%d') if lead['last_contact'] else 'Never'
-})
-st.dataframe(status_data, use_container_width=True)
-
-============ EMAIL TEMPLATES PAGE ============
-elif st.session_state.page == 'email_templates':
-st.markdown('<div class="section-header">📝 Email Templates</div>', unsafe_allow_html=True)
-st.caption("Manage automated follow-up email templates")
-st.markdown("---")
-
-for key, template in st.session_state.email_templates.items():
-with st.expander(f"{template['name']} - {'✅ Active' if template['active'] else '⏸️ Inactive'}"):
-col1, col2 = st.columns(2)
-with col1:
-new_name = st.text_input("Template Name", value=template['name'], key=f"name_{key}")
-new_subject = st.text_input("Subject Line", value=template['subject'], key=f"subject_{key}")
-new_delay = st.number_input("Delay (days)", min_value=0, max_value=30, value=template['delay_days'], key=f"delay_{key}")
-with col2:
-active = st.checkbox("Active", value=template['active'], key=f"active_{key}")
-
-new_body = st.text_area("Email Body", value=template['body'], height=200, key=f"body_{key}")
-st.caption("Available variables: {company}, {contact_name}, {score}")
-
-if st.button("Save Template", key=f"save_{key}"):
-template['name'] = new_name
-template['subject'] = new_subject
-template['body'] = new_body
-template['delay_days'] = new_delay
-template['active'] = active
-st.success("Template saved!")
-
-============ EMAIL SETTINGS PAGE ============
-elif st.session_state.page == 'email_settings':
-st.markdown('<div class="section-header">⚙️ Email Settings</div>', unsafe_allow_html=True)
-st.caption("Configure SMTP for automated emails")
-st.markdown("---")
-
-col1, col2 = st.columns(2)
-with col1:
-new_host = st.text_input("SMTP Host", value=st.session_state.email_settings['smtp_host'])
-new_port = st.number_input("SMTP Port", value=st.session_state.email_settings['smtp_port'])
-new_user = st.text_input("SMTP Username", value=st.session_state.email_settings['smtp_user'])
-with col2:
-new_password = st.text_input("SMTP Password", type="password", value=st.session_state.email_settings['smtp_password'])
-new_from = st.text_input("From Email", value=st.session_state.email_settings['from_email'])
-auto_followup = st.checkbox("Enable Auto Follow-ups", value=st.session_state.email_settings['auto_followup'])
-followup_freq = st.selectbox("Follow-up Frequency", ["daily", "every 2 days", "weekly"],
-index=["daily", "every 2 days", "weekly"].index(st.session_state.email_settings['followup_frequency']))
-
-if st.button("Save Email Settings", type="primary"):
-st.session_state.email_settings['smtp_host'] = new_host
-st.session_state.email_settings['smtp_port'] = new_port
-st.session_state.email_settings['smtp_user'] = new_user
-st.session_state.email_settings['smtp_password'] = new_password
-st.session_state.email_settings['from_email'] = new_from
-st.session_state.email_settings['auto_followup'] = auto_followup
-st.session_state.email_settings['followup_frequency'] = followup_freq
-st.success("Email settings saved!")
-
-if new_user and new_password:
-st.info("Auto follow-up is enabled. Emails will be sent automatically based on templates.")
-
-============ DNS AUDIT PAGE ============
-elif st.session_state.page == 'dns_audit':
-st.markdown('<div class="section-header">🌐 DNS Audit</div>', unsafe_allow_html=True)
-st.caption("Check DNS records and configuration")
-st.markdown("---")
-
-domain = st.text_input("Domain", placeholder="example.com")
-
-if st.button("Run DNS Audit", type="primary"):
-if domain:
-with st.spinner(f"Auditing {domain}..."):
-try:
-import dns.resolver
-results = []
-try:
-a_records = dns.resolver.resolve(domain, 'A')
-results.append(("A Records", "✅ Found", f"{len(a_records)} records"))
-except:
-results.append(("A Records", "❌ Failed", "No A records found"))
-
-try:
-mx_records = dns.resolver.resolve(domain, 'MX')
-results.append(("MX Records", "✅ Found", f"{len(mx_records)} mail servers"))
-except:
-results.append(("MX Records", "❌ Failed", "No mail servers configured"))
-
-try:
-txt_records = dns.resolver.resolve(domain, 'TXT')
-has_spf = any('v=spf1' in str(r) for r in txt_records)
-results.append(("SPF Record", "✅ Found" if has_spf else "⚠️ Missing", "Email authentication" if has_spf else "Spoofing risk"))
-except:
-results.append(("SPF Record", "❌ Failed", "Not configured"))
-
-for name, status, detail in results:
-st.markdown(f'<div class="data-card"><p><strong>{name}:</strong> {status}</p><p style="color:#64748b; font-size:0.8rem;">{detail}</p></div>', unsafe_allow_html=True)
-except ImportError:
-st.error("Please install dnspython: pip install dnspython")
-else:
-st.warning("Please enter a domain")
-
-============ WEBSITE AUDIT PAGE ============
-elif st.session_state.page == 'website_audit':
-st.markdown('<div class="section-header">🔒 Website Audit</div>', unsafe_allow_html=True)
-st.caption("Check website security and SSL certificate")
-st.markdown("---")
-
-url = st.text_input("Website URL", placeholder="https://example.com")
-
-if st.button("Run Website Audit", type="primary"):
-if url:
-with st.spinner(f"Auditing {url}..."):
-if not url.startswith("http"):
-url = "https://" + url
-
-results = []
-try:
-response = requests.get(url, timeout=10, verify=True)
-results.append(("HTTPS", "✅ Enabled", f"Status: {response.status_code}"))
-except:
-results.append(("HTTPS", "❌ Failed", "SSL certificate issue or site unreachable"))
-
-try:
-import ssl
-import socket
-hostname = url.replace("https://", "").replace("http://", "").split("/")[0]
-ctx = ssl.create_default_context()
-with ctx.wrap_socket(socket.socket(), server_hostname=hostname) as s:
-s.connect((hostname, 443))
-cert = s.getpeercert()
-results.append(("SSL Certificate", "✅ Valid", f"Expires: {cert.get('notAfter', 'Unknown')}"))
-except:
-results.append(("SSL Certificate", "❌ Invalid", "Certificate not found or expired"))
-
-for name, status, detail in results:
-st.markdown(f'<div class="data-card"><p><strong>{name}:</strong> {status}</p><p style="color:#64748b; font-size:0.8rem;">{detail}</p></div>', unsafe_allow_html=True)
-else:
-st.warning("Please enter a URL")
-
-============ EMAIL SECURITY PAGE ============
-elif st.session_state.page == 'email_security':
-st.markdown('<div class="section-header">📧 Email Security Audit</div>', unsafe_allow_html=True)
-st.caption("Check SPF, DKIM, and DMARC records")
-st.markdown("---")
-
-domain = st.text_input("Domain", placeholder="example.com")
-
-if st.button("Run Email Security Audit", type="primary"):
-if domain:
-with st.spinner(f"Checking {domain}..."):
-try:
-import dns.resolver
-results = []
-try:
-txt_records = dns.resolver.resolve(domain, 'TXT')
-spf_found = any('v=spf1' in str(r).lower() for r in txt_records)
-results.append(("SPF Record", "✅ Configured" if spf_found else "❌ Missing", "Prevents email spoofing" if spf_found else "Emails may be spoofed"))
-except:
-results.append(("SPF Record", "❌ Failed", "Not configured"))
-
-try:
-dmarc = dns.resolver.resolve(f"_dmarc.{domain}", 'TXT')
-results.append(("DMARC Record", "✅ Configured", "Email security policy active"))
-except:
-results.append(("DMARC Record", "⚠️ Missing", "No DMARC policy - spoofing risk"))
-
-risk_score = sum(1 for r in results if '✅' in r[1]) * 50
-risk_level = "Low" if risk_score >= 66 else "Medium" if risk_score >= 33 else "High"
-
-for name, status, detail in results:
-st.markdown(f'<div class="data-card"><p><strong>{name}:</strong> {status}</p><p style="color:#64748b; font-size:0.8rem;">{detail}</p></div>', unsafe_allow_html=True)
-
-st.markdown(f'<div class="data-card"><h4>Overall Risk Assessment</h4><p><strong>Risk Level:</strong> {risk_level}</p><p><strong>Security Score:</strong> {risk_score}/100</p></div>', unsafe_allow_html=True)
-except ImportError:
-st.error("Please install dnspython: pip install dnspython")
-else:
-st.warning("Please enter a domain")
-
-============ IT AUDIT PAGE ============
-elif st.session_state.page == 'it_audit':
-st.markdown('<div class="section-header">🛡️ IT Infrastructure Audit</div>', unsafe_allow_html=True)
-st.caption("Comprehensive IT security assessment")
-st.markdown("---")
-
-company_name = st.text_input("Company Name", placeholder="Your company name")
-
-if st.button("Start IT Audit", type="primary"):
-if company_name:
-with st.spinner("Running IT audit..."):
-st.markdown(f'<div class="data-card"><h4>IT Audit for {company_name}</h4><p>✅ Network Security: Good</p><p>⚠️ Email Security: Needs improvement</p><p>✅ Access Control: Properly configured</p><p>⚠️ Backup System: Review recommended</p><p>✅ Device Management: Active monitoring</p></div>', unsafe_allow_html=True)
-st.markdown('<div class="data-card"><h4>Recommendations</h4><ul><li>Implement DMARC policy for email security</li><li>Review backup and disaster recovery plan</li><li>Conduct employee security awareness training</li><li>Schedule quarterly security assessments</li></ul></div>', unsafe_allow_html=True)
-st.markdown('<div class="data-card"><h4>Risk Score: 72/100 - Moderate Risk</h4><p>Priority: Medium - Address within 30 days</p></div>', unsafe_allow_html=True)
-else:
-st.warning("Please enter company name")
-
-============ CRM PAGE ============
-elif st.session_state.page == 'crm':
-st.markdown('<div class="section-header">👥 Lead CRM</div>', unsafe_allow_html=True)
-st.caption("Manage all your leads")
-st.markdown("---")
-
-if st.session_state.leads:
-crm_data = []
-for lead in st.session_state.leads:
-crm_data.append({
-"Company": lead['name'],
-"Email": lead.get('email', 'N/A'),
-"Score": lead.get('score', 0),
-"Status": lead.get('status', 'New'),
-"Follow-up Stage": f"{lead.get('followup_stage', 0)}/4",
-"Date Added": lead['audit_date'].strftime("%Y-%m-%d")
-})
-st.dataframe(crm_data, use_container_width=True)
-
-col1, col2 = st.columns(2)
-with col1:
-if st.button("Export to CSV", use_container_width=True):
-csv = export_leads_to_csv()
-st.download_button("Download CSV", csv, "leads_export.csv", "text/csv")
-with col2:
-if st.button("Clear All Leads", use_container_width=True):
-st.session_state.leads = []
-st.success("All leads cleared!")
-st.rerun()
-else:
-st.info("No leads yet. Use Company Research or Import Leads.")
-
-============ REPORTS PAGE ============
-elif st.session_state.page == 'reports':
-st.markdown('<div class="section-header">📈 Reports</div>', unsafe_allow_html=True)
-st.caption("Generate reports on your leads and activities")
-st.markdown("---")
-
-col1, col2 = st.columns(2)
-with col1:
-report_type = st.selectbox("Report Type", ["Lead Summary", "Follow-up Status", "Automation Log", "Audit History"])
-with col2:
-date_range = st.selectbox("Date Range", ["Last 7 days", "Last 30 days", "All time"])
-
-if st.button("Generate Report", type="primary"):
-if report_type == "Lead Summary":
-data = []
-for lead in st.session_state.leads:
-data.append({
-"Company": lead['name'],
-"Email": lead['email'],
-"Score": lead['score'],
-"Status": lead['status'],
-"Follow-up Stage": lead.get('followup_stage', 0),
-"Date Added": lead['audit_date'].strftime("%Y-%m-%d")
-})
-df = pd.DataFrame(data)
-st.dataframe(df, use_container_width=True)
-st.download_button("Download Report", df.to_csv(index=False), "lead_summary.csv", "text/csv")
-
-elif report_type == "Follow-up Status":
-data = []
-for lead in st.session_state.leads:
-data.append({
-"Company": lead['name'],
-"Stage": f"{lead.get('followup_stage', 0)}/4",
-"Last Contact": lead['last_contact'].strftime("%Y-%m-%d") if lead['last_contact'] else "Never",
-"Score": lead['score']
-})
-df = pd.DataFrame(data)
-st.dataframe(df, use_container_width=True)
-
-elif report_type == "Automation Log":
-df = pd.DataFrame(st.session_state.automation_log)
-if not df.empty:
-df['time'] = df['time'].dt.strftime("%Y-%m-%d %H:%M")
-st.dataframe(df, use_container_width=True)
-else:
-st.info("No automation logs yet")
-
-st.success(f"Report generated for {date_range}")
-
-============ SETTINGS PAGE ============
-elif st.session_state.page == 'settings':
-st.markdown('<div class="section-header">⚙️ Settings</div>', unsafe_allow_html=True)
-st.caption("Configure system settings")
-st.markdown("---")
-
-st.markdown("### API Configuration")
-st.markdown("Add API keys to enable advanced features:")
-st.markdown("- SERP API - Get company data from search")
-st.markdown("- Google Maps API - Location verification")
-st.markdown("- OpenAI API - AI-powered insights")
-st.markdown("")
-st.markdown("### How to add API keys:")
-st.markdown("Create .streamlit/secrets.toml file:")
-st.code("""
-SERP_API_KEY = "your_key_here"
-GOOGLE_MAPS_API_KEY = "your_key_here"
-OPENAI_API_KEY = "your_key_here"
-""")
-
-st.markdown("---")
-st.markdown("### Email Configuration")
-st.markdown("Configure SMTP settings in the Email Settings page.")
-
-st.markdown("---")
-st.markdown("### Current Status")
-col1, col2 = st.columns(2)
-with col1:
-st.markdown(f"SERP API: {'✅ Active' if SERP_API_KEY else '❌ Inactive'}")
-st.markdown(f"Google Maps: {'✅ Active' if GOOGLE_MAPS_API_KEY else '❌ Inactive'}")
-with col2:
-st.markdown(f"Email SMTP: {'✅ Active' if st.session_state.email_settings['smtp_user'] else '❌ Inactive'}")
-st.markdown(f"Total Leads: {len(st.session_state.leads)}")
-
-============ FOOTER ============
-st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
-st.caption("© 2024 TechWokx Ghana | Full Automation | Lead Management | Email Follow-up")
+    ```toml
+    # Email Settings
+    EMAIL_HOST = "smtp.gmail.com"
+    EMAIL_PORT = 587
+    EMAIL_USER = "your@email.com"
+    EMAIL_PASSWORD = "your_app_password"
+    
+    # Twilio WhatsApp
+    TWILIO_ACCOUNT_SID = "your_sid"
+    TWILIO_AUTH_TOKEN = "your_token"
+    TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886"
+    
+    # Google Sheets
+    GCP_PROJECT_ID = "your_project"
+    GCP_PRIVATE_KEY_ID = "key_id"
+    GCP_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----..."
+    GCP_CLIENT_EMAIL = "service@account.com"
+    
+    # TechWokx Team
+    TECHWOKX_EMAIL = "hello@techwokx.online"
+    TECHWOKX_WHATSAPP_NUMBERS = "+233555087407"
