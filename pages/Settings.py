@@ -26,29 +26,213 @@ try:
 except Exception:
     pass
 
-# Import database modules with error handling
+# Import database modules
 try:
     from modules.database import get_session, CRMCompany, ResearchHistory
     import sqlite3
     import pandas as pd
     from datetime import datetime
+    import json
     DB_AVAILABLE = True
 except ImportError as e:
     DB_AVAILABLE = False
     st.error(f"⚠️ Database module not available: {e}")
 
 st.markdown("# ⚙️ Settings")
-st.caption("Configure your lead intelligence platform")
+st.caption("Configure API keys and system settings")
 st.markdown("---")
 
-# Create tabs for different settings
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Database", "🔍 Research Settings", "🎨 Display", "📋 About"])
+# Initialize session state for API keys
+if 'api_keys' not in st.session_state:
+    st.session_state.api_keys = {
+        'google_maps': os.getenv('GOOGLE_MAPS_API_KEY', ''),
+        'serp_api': os.getenv('SERP_API_KEY', ''),
+        'anthropic': os.getenv('ANTHROPIC_API_KEY', ''),
+        'openai': os.getenv('OPENAI_API_KEY', ''),
+        'resend': os.getenv('RESEND_API_KEY', ''),
+    }
 
-# Tab 1: Database Settings
+# Save function
+def save_api_keys():
+    """Save API keys to .env file"""
+    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+    
+    # Read existing .env content
+    env_vars = {}
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        env_vars[key] = value
+    
+    # Update with new values
+    for key, value in st.session_state.api_keys.items():
+        if value:
+            env_vars[key.upper()] = value
+    
+    # Write back to .env
+    with open(env_path, 'w') as f:
+        for key, value in env_vars.items():
+            f.write(f"{key}={value}\n")
+    
+    # Reload environment
+    load_dotenv(override=True)
+    st.success("✅ API keys saved successfully!")
+
+# Create tabs
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔑 API Keys", "📊 Database", "🔍 Research", "🎨 Display", "📋 About"])
+
+# Tab 1: API Keys
 with tab1:
+    st.markdown("### API Configuration")
+    st.caption("Configure your API keys for enhanced functionality")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 🌐 Google Maps API")
+        google_maps_key = st.text_input(
+            "Google Maps API Key",
+            value=st.session_state.api_keys['google_maps'],
+            type="password",
+            placeholder="AIzaSy...",
+            help="Used for address validation and geocoding"
+        )
+        st.session_state.api_keys['google_maps'] = google_maps_key
+        
+        if google_maps_key:
+            st.caption("✅ Used for: Address validation, location data")
+        
+        st.markdown("---")
+        
+        st.markdown("#### 🔍 SERP API")
+        serp_api_key = st.text_input(
+            "SERP API Key",
+            value=st.session_state.api_keys['serp_api'],
+            type="password",
+            placeholder="your_serp_api_key",
+            help="Used for Google search results"
+        )
+        st.session_state.api_keys['serp_api'] = serp_api_key
+        
+        if serp_api_key:
+            st.caption("✅ Used for: Search engine results, competitor analysis")
+    
+    with col2:
+        st.markdown("#### 🧠 Anthropic API (Claude)")
+        anthropic_key = st.text_input(
+            "Anthropic API Key",
+            value=st.session_state.api_keys['anthropic'],
+            type="password",
+            placeholder="sk-ant-...",
+            help="Used for AI analysis and lead intelligence"
+        )
+        st.session_state.api_keys['anthropic'] = anthropic_key
+        
+        if anthropic_key:
+            st.caption("✅ Used for: AI-powered insights, lead scoring")
+        
+        st.markdown("---")
+        
+        st.markdown("#### 🤖 OpenAI API (GPT)")
+        openai_key = st.text_input(
+            "OpenAI API Key",
+            value=st.session_state.api_keys['openai'],
+            type="password",
+            placeholder="sk-...",
+            help="Used for AI analysis and content generation"
+        )
+        st.session_state.api_keys['openai'] = openai_key
+        
+        if openai_key:
+            st.caption("✅ Used for: AI analysis, proposal generation")
+    
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("#### 📧 Resend (Email)")
+        resend_key = st.text_input(
+            "Resend API Key",
+            value=st.session_state.api_keys['resend'],
+            type="password",
+            placeholder="re_...",
+            help="Used for sending follow-up emails"
+        )
+        st.session_state.api_keys['resend'] = resend_key
+        
+        if resend_key:
+            st.caption("✅ Used for: Email automation, lead nurturing")
+    
+    with col2:
+        st.markdown("#### 📅 Calendly")
+        calendly_link = st.text_input(
+            "Calendly Link",
+            value=os.getenv('CALENDLY_LINK', ''),
+            placeholder="https://calendly.com/your-link",
+            help="Booking link for consultations"
+        )
+        if calendly_link:
+            st.session_state.calendly_link = calendly_link
+    
+    with col3:
+        st.markdown("#### 🌍 Default Country")
+        default_country = st.selectbox(
+            "Default Country for Research",
+            ["Ghana", "Nigeria", "Kenya", "South Africa", "Egypt", "Other"]
+        )
+        st.session_state.default_country = default_country
+    
+    st.markdown("---")
+    
+    # Save button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("💾 Save All API Keys", type="primary", use_container_width=True):
+            save_api_keys()
+            
+            # Update environment variables in memory
+            if google_maps_key:
+                os.environ['GOOGLE_MAPS_API_KEY'] = google_maps_key
+            if serp_api_key:
+                os.environ['SERP_API_KEY'] = serp_api_key
+            if anthropic_key:
+                os.environ['ANTHROPIC_API_KEY'] = anthropic_key
+            if openai_key:
+                os.environ['OPENAI_API_KEY'] = openai_key
+            if resend_key:
+                os.environ['RESEND_API_KEY'] = resend_key
+            
+            st.balloons()
+    
+    # API Status Summary
+    st.markdown("---")
+    st.markdown("### API Status Summary")
+    
+    status_cols = st.columns(4)
+    apis = {
+        "Google Maps": bool(st.session_state.api_keys['google_maps']),
+        "SERP API": bool(st.session_state.api_keys['serp_api']),
+        "Anthropic": bool(st.session_state.api_keys['anthropic']),
+        "OpenAI": bool(st.session_state.api_keys['openai']),
+        "Resend": bool(st.session_state.api_keys['resend'])
+    }
+    
+    for i, (api_name, is_configured) in enumerate(apis.items()):
+        with status_cols[i % 4]:
+            if is_configured:
+                st.success(f"✅ {api_name}")
+            else:
+                st.warning(f"⚠️ {api_name}")
+
+# Tab 2: Database Settings
+with tab2:
     st.markdown("### Database Management")
     
-    # Get database path
     db_path = "data/company_research.db"
     
     col1, col2 = st.columns(2)
@@ -57,41 +241,33 @@ with tab1:
         st.markdown("#### Database Information")
         st.write(f"**Database Path:** `{db_path}`")
         
-        # Check if database exists
         if os.path.exists(db_path):
-            db_size = os.path.getsize(db_path) / 1024  # KB
+            db_size = os.path.getsize(db_path) / 1024
             st.write(f"**Database Size:** {db_size:.2f} KB")
             
-            # Get record counts
             try:
                 conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
                 
-                # Count records
                 cursor.execute("SELECT COUNT(*) FROM crm_companies")
                 company_count = cursor.fetchone()[0]
                 
                 cursor.execute("SELECT COUNT(*) FROM research_history")
                 research_count = cursor.fetchone()[0]
                 
-                cursor.execute("SELECT COUNT(*) FROM crm_activities")
-                activity_count = cursor.fetchone()[0]
-                
                 conn.close()
                 
                 st.write(f"**Companies:** {company_count}")
                 st.write(f"**Research History:** {research_count}")
-                st.write(f"**Activities:** {activity_count}")
                 
             except Exception as e:
                 st.warning(f"Could not read database stats: {e}")
         else:
-            st.warning("Database file not found. It will be created when you research companies.")
+            st.warning("Database file not found")
     
     with col2:
         st.markdown("#### Database Actions")
         
-        # Backup database
         if st.button("💾 Backup Database", use_container_width=True):
             if os.path.exists(db_path):
                 backup_path = f"data/backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
@@ -101,190 +277,86 @@ with tab1:
             else:
                 st.warning("No database file to backup")
         
-        # Export database
-        if st.button("📤 Export Database (CSV)", use_container_width=True):
+        if st.button("🔄 Vacuum Database", use_container_width=True):
             try:
                 conn = sqlite3.connect(db_path)
-                
-                # Export companies
-                companies_df = pd.read_sql_query("SELECT * FROM crm_companies", conn)
-                companies_csv = companies_df.to_csv(index=False)
-                
-                # Export research history
-                research_df = pd.read_sql_query("SELECT * FROM research_history", conn)
-                research_csv = research_df.to_csv(index=False)
-                
+                conn.execute("VACUUM")
                 conn.close()
-                
-                # Provide download buttons
-                st.download_button(
-                    "Download Companies CSV",
-                    companies_csv,
-                    "companies_export.csv",
-                    "text/csv"
-                )
-                
-                st.download_button(
-                    "Download Research History CSV",
-                    research_csv,
-                    "research_history_export.csv",
-                    "text/csv"
-                )
-                
+                st.success("Database optimized successfully!")
             except Exception as e:
-                st.error(f"Export failed: {e}")
-        
-        # Clear all data (with confirmation)
-        st.markdown("#### Danger Zone")
-        if st.button("🗑️ Clear All Data", type="secondary", use_container_width=True):
-            st.session_state.confirm_clear = True
-        
-        if st.session_state.get('confirm_clear'):
-            st.warning("⚠️ This will delete ALL data! Are you sure?")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ Yes, Clear All Data", use_container_width=True):
-                    try:
-                        if os.path.exists(db_path):
-                            os.remove(db_path)
-                            st.success("Database cleared! Restart the app to recreate it.")
-                        else:
-                            st.info("No database to clear")
-                        st.session_state.confirm_clear = False
-                    except Exception as e:
-                        st.error(f"Error clearing database: {e}")
-            with col2:
-                if st.button("❌ Cancel", use_container_width=True):
-                    st.session_state.confirm_clear = False
-                    st.rerun()
-    
-    # Database optimization
-    st.markdown("#### Database Optimization")
-    if st.button("🔄 Vacuum Database (Optimize)", use_container_width=True):
-        try:
-            conn = sqlite3.connect(db_path)
-            conn.execute("VACUUM")
-            conn.close()
-            st.success("Database optimized successfully!")
-        except Exception as e:
-            st.error(f"Optimization failed: {e}")
+                st.error(f"Optimization failed: {e}")
 
-# Tab 2: Research Settings
-with tab2:
+# Tab 3: Research Settings
+with tab3:
     st.markdown("### Research Configuration")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("#### API Settings")
+        st.markdown("#### API Sources")
+        use_google_maps = st.checkbox("Use Google Maps API", value=bool(st.session_state.api_keys['google_maps']))
+        use_serp = st.checkbox("Use SERP API", value=bool(st.session_state.api_keys['serp_api']))
+        use_ai_analysis = st.checkbox("Use AI Analysis", value=bool(st.session_state.api_keys['anthropic'] or st.session_state.api_keys['openai']))
         
-        # DuckDuckGo API
-        use_ddg = st.checkbox("Enable DuckDuckGo Search", value=True)
-        st.caption("Uses DuckDuckGo API for company information")
-        
-        # Timeout settings
+        st.markdown("#### Timeout Settings")
         timeout = st.slider("Request Timeout (seconds)", 5, 30, 10)
-        st.session_state['research_timeout'] = timeout
-        
+    
     with col2:
         st.markdown("#### Crawler Settings")
-        
-        # Crawl depth
         crawl_depth = st.slider("Website Crawl Depth", 1, 10, 3)
-        st.session_state['crawl_depth'] = crawl_depth
-        
-        # Max pages
         max_pages = st.slider("Maximum Pages to Crawl", 1, 20, 5)
-        st.session_state['max_pages'] = max_pages
-    
-    st.markdown("#### Lead Scoring Weights")
-    st.caption("Adjust how lead scores are calculated")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        website_weight = st.slider("Website Presence", 0, 30, 25)
-    with col2:
-        email_weight = st.slider("Email Contact", 0, 20, 15)
-    with col3:
-        phone_weight = st.slider("Phone Contact", 0, 20, 10)
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        dns_weight = st.slider("DNS/Email Security", 0, 30, 25)
-    with col2:
-        social_weight = st.slider("Social Presence", 0, 20, 15)
-    with col3:
-        address_weight = st.slider("Physical Address", 0, 20, 10)
+        
+        st.markdown("#### AI Model Preference")
+        ai_model = st.selectbox("Preferred AI Model", ["Anthropic Claude", "OpenAI GPT", "Both (fallback)"])
     
     if st.button("💾 Save Research Settings", type="primary", use_container_width=True):
-        # Save to session state
-        st.session_state['weights'] = {
-            'website': website_weight,
-            'email': email_weight,
-            'phone': phone_weight,
-            'dns': dns_weight,
-            'social': social_weight,
-            'address': address_weight
+        st.session_state.research_settings = {
+            'timeout': timeout,
+            'crawl_depth': crawl_depth,
+            'max_pages': max_pages,
+            'use_google_maps': use_google_maps,
+            'use_serp': use_serp,
+            'use_ai_analysis': use_ai_analysis,
+            'ai_model': ai_model
         }
-        st.success("✅ Settings saved successfully!")
+        st.success("Research settings saved!")
 
-# Tab 3: Display Settings
-with tab3:
+# Tab 4: Display Settings
+with tab4:
     st.markdown("### Display Preferences")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("#### Theme Settings")
+        st.markdown("#### Theme")
+        theme = st.selectbox("Theme", ["Dark", "Light", "System"])
         
-        # Theme selection
-        theme = st.selectbox("Theme", ["Dark", "Light", "System Default"])
-        
-        # Color scheme
-        primary_color = st.color_picker("Primary Color", "#fbbf24")
-        
-        st.markdown("#### Dashboard Settings")
-        
-        # Default view
+        st.markdown("#### Dashboard Defaults")
         default_view = st.selectbox("Default Dashboard View", ["Summary", "Detailed", "Compact"])
-        
-        # Items per page
         items_per_page = st.selectbox("Items per page", [10, 25, 50, 100])
     
     with col2:
         st.markdown("#### Chart Settings")
-        
-        # Chart theme
-        chart_theme = st.selectbox("Chart Theme", ["Streamlit", "Plotly", "Altair"])
-        
-        # Show animations
+        chart_theme = st.selectbox("Chart Theme", ["Streamlit", "Plotly"])
         show_animations = st.checkbox("Show animations", value=True)
         
         st.markdown("#### Notification Settings")
-        
-        # Email notifications
         email_notifications = st.checkbox("Email notifications", value=False)
-        
-        # Browser notifications
-        browser_notifications = st.checkbox("Browser notifications", value=True)
     
-    if st.button("🎨 Apply Display Settings", type="primary", use_container_width=True):
-        st.session_state['theme'] = theme
-        st.session_state['primary_color'] = primary_color
-        st.success("Display settings applied! Refresh to see changes.")
+    if st.button("🎨 Apply Display Settings", use_container_width=True):
+        st.session_state.theme = theme
+        st.success("Display settings applied!")
         st.rerun()
 
-# Tab 4: About
-with tab4:
+# Tab 5: About
+with tab5:
     st.markdown("### About TechWokx Lead Intelligence")
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
         st.markdown("""
-        **Version:** 1.0.0
+        **Version:** 2.0.0
         
         **Features:**
         - 🔍 Company Research (Single & Bulk)
@@ -293,16 +365,20 @@ with tab4:
         - 📄 Proposal Generator
         - 🌐 Website & SSL Audit
         - 📈 Analytics Dashboard
+        - 📧 Email Automation (Resend)
+        - 🧠 AI Analysis (Claude/GPT)
         
-        **Technologies Used:**
-        - Streamlit for UI
-        - SQLite for database
-        - DuckDuckGo API for research
-        - Custom DNS audit tools
+        **API Integrations:**
+        - Google Maps API - Address validation
+        - SERP API - Search results
+        - Anthropic Claude - AI insights
+        - OpenAI GPT - Content generation
+        - Resend - Email delivery
         
         **Support:**
-        - Email: support@techwokx.com
-        - Website: https://techwokx.com
+        - Email: hello@techwokx.online
+        - WhatsApp: +233 555 087 407
+        - Website: https://techwokx.online
         """)
     
     with col2:
@@ -312,28 +388,18 @@ with tab4:
         st.write(f"**Python:** {sys.version.split()[0]}")
         st.write(f"**Streamlit:** {st.__version__}")
         
-        # Check module availability
-        modules_status = {
-            "SQLite": "✅",
-            "Pandas": "✅" if 'pd' in dir() else "❌",
-            "Requests": "✅" if 'requests' in sys.modules else "❌",
-        }
+        # API Status
+        st.markdown("**API Status:**")
+        apis_configured = sum(1 for v in st.session_state.api_keys.values() if v)
+        st.write(f"✅ {apis_configured}/5 APIs configured")
         
-        st.markdown("**Modules:**")
-        for module, status in modules_status.items():
-            st.write(f"{status} {module}")
-    
-    # Reset app button
-    st.markdown("---")
-    st.markdown("### Reset Application")
-    
-    if st.button("🔄 Reset All Settings", type="secondary", use_container_width=True):
-        st.session_state.clear()
-        st.success("All settings reset! Please restart the app.")
-        st.rerun()
-    
-    st.caption("© 2024 TechWokx Technologies. All rights reserved.")
+        # Reset app button
+        st.markdown("---")
+        if st.button("🔄 Reset All Settings", type="secondary", use_container_width=True):
+            st.session_state.clear()
+            st.success("All settings reset! Please restart the app.")
+            st.rerun()
 
 # Footer
 st.markdown("---")
-st.caption(f"Settings last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"Settings • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
