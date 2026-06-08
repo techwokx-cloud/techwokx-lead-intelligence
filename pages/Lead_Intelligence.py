@@ -1,20 +1,32 @@
-# NEW (safe)
-try:
-    from modules.theme import THEME_CSS
-    st.markdown(THEME_CSS, unsafe_allow_html=True)
-except Exception:
-    # Fallback - no theme styling
-    pass
+import os, sys
+root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if root not in sys.path:
+    sys.path.insert(0, root)
+
+import streamlit as st
+from modules.theme import THEME_CSS
+if THEME_CSS and isinstance(THEME_CSS, str):
+    try:
+        st.markdown(THEME_CSS, unsafe_allow_html=True)
+    except Exception:
+        st.warning('Failed to apply theme CSS')
+
 from modules.ai_analysis import generate_ai_analysis
 from modules.crm import get_all_companies, get_company, log_activity
-import os
 
 st.markdown("# 🧠 Lead Intelligence")
 st.caption("AI-powered analysis — risks, opportunities and recommended actions.")
 st.markdown("---")
 
-has_ai = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY"))
-provider = "claude" if os.getenv("ANTHROPIC_API_KEY") else "openai"
+anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+openai_key = os.getenv("OPENAI_API_KEY")
+has_ai = bool(anthropic_key or openai_key)
+if anthropic_key:
+    provider = "claude"
+elif openai_key:
+    provider = "openai"
+else:
+    provider = None
 
 if not has_ai:
     st.warning("⚠️ No AI API key set. Add keys in **Settings**. Fallback analysis will be used.")
@@ -43,8 +55,16 @@ with tab1:
 with tab2:
     companies = get_all_companies()
     if companies:
-        opts = {f"{c.company_name} — {c.lead_status or 'Cold'} — {int(c.lead_score or 0)}/100": c.id for c in companies}
-        sel = st.selectbox("Choose company", list(opts.keys()))
+        opts = {}
+        for c in companies:
+            try:
+                score = int(float(c.lead_score)) if c.lead_score is not None else 0
+            except Exception:
+                score = 0
+            label = f"{c.company_name} — { (c.lead_status or 'Cold') } — {score}/100"
+            opts[label] = c.id
+        keys = sorted(opts.keys())
+        sel = st.selectbox("Choose company", keys)
         if st.button("🤖 Analyse", type="primary"):
             co = get_company(opts[sel])
             class R:
@@ -64,6 +84,9 @@ if "last_ai" not in st.session_state:
     st.stop()
 
 ai = st.session_state["last_ai"]
+if not isinstance(ai, dict):
+    st.error("AI analysis returned unexpected format.")
+    st.stop()
 st.markdown("---")
 
 urgency = ai.get("urgency","MEDIUM")
@@ -104,4 +127,5 @@ with c2:
 st.markdown("---")
 if st.button("📄 Generate Proposal from This Analysis", type="primary"):
     st.session_state["ai_for_proposal"] = ai
-    st.switch_page("pages/Proposal_Generator.py")
+    st.switch_page("Proposal_Generator")
+
