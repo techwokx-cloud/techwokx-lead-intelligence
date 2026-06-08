@@ -1,3 +1,4 @@
+# modules/dns_audit.py
 import dns.resolver
 import dns.exception
 from dataclasses import dataclass, field
@@ -23,12 +24,12 @@ class DNSResult:
 def run_dns_audit(domain: str) -> DNSResult:
     """Run comprehensive DNS audit for a domain"""
     result = DNSResult(domain=domain, score=0, grade="F")
+    findings = []
     total_score = 0
-    max_score = 100
     
     # Check MX records
     mx_finding = check_mx_records(domain)
-    result.findings.append(mx_finding)
+    findings.append(mx_finding)
     if mx_finding.status == "PASS":
         total_score += 30
         result.has_mx = True
@@ -36,26 +37,28 @@ def run_dns_audit(domain: str) -> DNSResult:
     
     # Check SPF
     spf_finding = check_spf(domain)
-    result.findings.append(spf_finding)
+    findings.append(spf_finding)
     if spf_finding.status == "PASS":
         total_score += 25
     
     # Check DMARC
     dmarc_finding = check_dmarc(domain)
-    result.findings.append(dmarc_finding)
+    findings.append(dmarc_finding)
     if dmarc_finding.status == "PASS":
         total_score += 25
         result.has_dmarc = True
     
-    # Check DKIM (simplified - just checks if DKIM record exists)
+    # Check DKIM (simplified)
     dkim_finding = check_dkim(domain)
-    result.findings.append(dkim_finding)
+    findings.append(dkim_finding)
     if dkim_finding.status == "PASS":
         total_score += 20
     
-    # Calculate score and grade
+    # Set results
     result.score = total_score
+    result.findings = findings
     
+    # Calculate grade
     if result.score >= 90:
         result.grade = "A+"
     elif result.score >= 80:
@@ -110,7 +113,8 @@ def check_spf(domain: str) -> DNSFinding:
     try:
         spf_records = dns.resolver.resolve(domain, 'TXT')
         for record in spf_records:
-            if 'v=spf1' in str(record).lower():
+            record_str = str(record).lower()
+            if 'v=spf1' in record_str:
                 return DNSFinding(
                     check="SPF Record",
                     status="PASS",
@@ -121,6 +125,13 @@ def check_spf(domain: str) -> DNSFinding:
             check="SPF Record",
             status="FAIL",
             detail="No SPF record found - email spoofing risk",
+            value=""
+        )
+    except dns.resolver.NoAnswer:
+        return DNSFinding(
+            check="SPF Record",
+            status="FAIL",
+            detail="No SPF record found",
             value=""
         )
     except Exception as e:
@@ -137,7 +148,8 @@ def check_dmarc(domain: str) -> DNSFinding:
     try:
         dmarc_records = dns.resolver.resolve(dmarc_domain, 'TXT')
         for record in dmarc_records:
-            if 'v=DMARC1' in str(record).upper():
+            record_str = str(record).upper()
+            if 'V=DMARC1' in record_str:
                 return DNSFinding(
                     check="DMARC Record",
                     status="PASS",
@@ -166,7 +178,7 @@ def check_dmarc(domain: str) -> DNSFinding:
         )
 
 def check_dkim(domain: str) -> DNSFinding:
-    """Check for DKIM records (simplified - checks common selectors)"""
+    """Check for DKIM records"""
     common_selectors = ['default', 'google', 'selector1', 'dkim', 'mail']
     
     for selector in common_selectors:
