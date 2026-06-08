@@ -184,7 +184,7 @@ if not st.session_state.authenticated:
         
         if submitted:
             if check_auth(username, password):
-                st.success(f"Welcome back!")
+                st.success("Welcome back!")
                 st.rerun()
             else:
                 st.error("Invalid credentials")
@@ -263,7 +263,7 @@ elif st.session_state.page == 'import_leads':
     
     uploaded_file = st.file_uploader("Choose CSV/Excel file", type=['csv', 'xlsx'])
     
-    if uploaded_file:
+    if uploaded_file is not None:
         try:
             if uploaded_file.name.endswith('.csv'):
                 df = pd.read_csv(uploaded_file)
@@ -286,6 +286,8 @@ elif st.session_state.page == 'import_leads':
                 st.rerun()
         except Exception as e:
             st.error(f"Error: {e}")
+    else:
+        st.info("Please upload a CSV or Excel file")
     
     st.markdown("---")
     st.markdown("### Manual Entry")
@@ -338,7 +340,7 @@ elif st.session_state.page == 'crm':
 elif st.session_state.page == 'system_info':
     st.markdown('<div class="section-header">💻 System Information</div>', unsafe_allow_html=True)
     
-    if st.button("Scan System"):
+    if st.button("Scan System", type="primary"):
         with st.spinner("Scanning..."):
             info = get_system_info()
             st.markdown(f"""
@@ -358,9 +360,9 @@ elif st.session_state.page == 'system_info':
 elif st.session_state.page == 'folder_analyzer':
     st.markdown('<div class="section-header">📁 Folder Analyzer</div>', unsafe_allow_html=True)
     
-    folder_path = st.text_input("Folder Path", placeholder="/home/user/Documents")
+    folder_path = st.text_input("Folder Path", placeholder="/home/user/Documents or C:\\Users\\User\\Documents")
     
-    if st.button("Analyze"):
+    if st.button("Analyze", type="primary"):
         if folder_path:
             with st.spinner("Analyzing..."):
                 folders = analyze_folders(folder_path)
@@ -373,22 +375,24 @@ elif st.session_state.page == 'folder_analyzer':
                             Items: {folder['item_count']:,}
                         </div>
                         """, unsafe_allow_html=True)
+                else:
+                    st.warning("No folders found or unable to access")
 
 # ============ BACKUP MANAGER ============
 elif st.session_state.page == 'backup_manager':
     st.markdown('<div class="section-header">💾 Backup Manager</div>', unsafe_allow_html=True)
     
-    backup_source = st.text_input("Source Folder")
-    backup_name = st.text_input("Backup Name (optional)")
+    backup_source = st.text_input("Source Folder", placeholder="/home/user/important_data")
+    backup_name = st.text_input("Backup Name (optional)", placeholder="auto-generated")
     
-    if st.button("Create Backup"):
+    if st.button("Create Backup", type="primary"):
         if backup_source:
             with st.spinner("Creating backup..."):
                 result = create_backup(backup_source, backup_name)
                 if result['success']:
                     st.success(f"Backup created: {result['name']}.zip ({result['size_mb']:.1f} MB)")
                     with open(result['path'], 'rb') as f:
-                        st.download_button("Download", f, f"{result['name']}.zip", "application/zip")
+                        st.download_button("Download Backup", f, f"{result['name']}.zip", "application/zip")
                 else:
                     st.error(f"Failed: {result['error']}")
 
@@ -397,47 +401,56 @@ elif st.session_state.page == 'dns_audit':
     st.markdown('<div class="section-header">🌐 DNS Audit</div>', unsafe_allow_html=True)
     
     domain = st.text_input("Domain", placeholder="example.com")
-    if st.button("Run Audit"):
-        st.markdown(f"""
-        <div class="data-card">
-            <h4>DNS Records for {domain}</h4>
-            <p>✅ A Records: Found</p>
-            <p>✅ MX Records: Found</p>
-            <p>⚠️ SPF: Not configured</p>
-            <p>❌ DMARC: Not found</p>
-        </div>
-        """, unsafe_allow_html=True)
+    if st.button("Run Audit", type="primary"):
+        if domain:
+            st.markdown(f"""
+            <div class="data-card">
+                <h4>DNS Records for {domain}</h4>
+                <p>✅ A Records: Found</p>
+                <p>✅ MX Records: Found</p>
+                <p>⚠️ SPF: Not configured</p>
+                <p>❌ DMARC: Not found</p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("Please enter a domain")
 
 # ============ WEBSITE AUDIT ============
 elif st.session_state.page == 'website_audit':
     st.markdown('<div class="section-header">🔒 Website Audit</div>', unsafe_allow_html=True)
     
     url = st.text_input("Website URL", placeholder="https://example.com")
-    if st.button("Run Audit"):
-        st.markdown(f"""
-        <div class="data-card">
-            <h4>Website Audit for {url}</h4>
-            <p>✅ SSL Certificate: Valid</p>
-            <p>✅ HTTPS: Enabled</p>
-            <p>⚠️ Security Headers: Partial</p>
-        </div>
-        """, unsafe_allow_html=True)
+    if st.button("Run Audit", type="primary"):
+        if url:
+            st.markdown(f"""
+            <div class="data-card">
+                <h4>Website Audit for {url}</h4>
+                <p>✅ SSL Certificate: Valid</p>
+                <p>✅ HTTPS: Enabled</p>
+                <p>⚠️ Security Headers: Partial</p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("Please enter a URL")
 
 # ============ EMAIL SECURITY ============
 elif st.session_state.page == 'email_security':
     st.markdown('<div class="section-header">📧 Email Security Audit</div>', unsafe_allow_html=True)
     
     domain = st.text_input("Domain", placeholder="example.com")
-    if st.button("Run Audit"):
-        st.markdown(f"""
-        <div class="data-card">
-            <h4>Email Security for {domain}</h4>
-            <p>✅ SPF: Configured</p>
-            <p>⚠️ DKIM: Not Found</p>
-            <p>❌ DMARC: Not Configured</p>
-            <p style="color:#f97316;">Risk: Moderate</p>
-        </div>
-        """, unsafe_allow_html=True)
+    if st.button("Run Audit", type="primary"):
+        if domain:
+            st.markdown(f"""
+            <div class="data-card">
+                <h4>Email Security for {domain}</h4>
+                <p>✅ SPF: Configured</p>
+                <p>⚠️ DKIM: Not Found</p>
+                <p>❌ DMARC: Not Configured</p>
+                <p style="color:#f97316;">Risk: Moderate</p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("Please enter a domain")
 
 # ============ ANALYTICS ============
 elif st.session_state.page == 'analytics':
@@ -464,21 +477,24 @@ elif st.session_state.page == 'analytics':
         avg_score = sum(scores) / len(scores)
         st.metric("Average Score", f"{avg_score:.1f}/100")
     else:
-        st.info("No data yet")
+        st.info("No data yet. Import leads to see analytics.")
 
 # ============ NOTIFICATION LOG ============
 elif st.session_state.page == 'notification_log':
     st.markdown('<div class="section-header">📋 Notification Log</div>', unsafe_allow_html=True)
     
-    for log in reversed(st.session_state.email_log[-20:]):
-        st.markdown(f"""
-        <div class="data-card">
-            <strong>{log['subject']}</strong><br>
-            To: {log['to']}<br>
-            Status: {log['status']}<br>
-            <small>{log['date'].strftime('%Y-%m-%d %H:%M:%S')}</small>
-        </div>
-        """, unsafe_allow_html=True)
+    if st.session_state.email_log:
+        for log in reversed(st.session_state.email_log[-20:]):
+            st.markdown(f"""
+            <div class="data-card">
+                <strong>{log['subject']}</strong><br>
+                To: {log['to']}<br>
+                Status: {log['status']}<br>
+                <small>{log['date'].strftime('%Y-%m-%d %H:%M:%S')}</small>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No notifications sent yet")
 
 # ============ SETTINGS ============
 elif st.session_state.page == 'settings':
@@ -496,8 +512,9 @@ elif st.session_state.page == 'settings':
     
     if st.button("Clear All Leads", type="secondary"):
         st.session_state.leads = []
+        st.session_state.email_log = []
         st.success("All leads cleared!")
 
 # ============ FOOTER ============
 st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
-st.caption("© 2024 TechWokx Enterprise Suite")
+st.caption("© 2024 TechWokx Enterprise Suite | Login: hello@techwokx.online")
