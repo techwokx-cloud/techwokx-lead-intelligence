@@ -1,9 +1,0 @@
-# Email SMTP (use SendGrid or Brevo for high volume)
-SMTP_HOST=smtp.sendgrid.net
-SMTP_PORT=587
-SMTP_USER=apikey
-SMTP_FROM=hello@techwokx.online
-SMTP_PASSWORD=your_api_key
-
-# Calendar link for booking
-CALENDLY_LINK=https://calendly.com/techwokx/audit-review
