@@ -34,7 +34,8 @@ if 'bid_history' not in st.session_state:
     st.session_state.bid_history = []
 if 'api_keys' not in st.session_state:
     st.session_state.api_keys = {
-        'rapidapi': '',
+        'rapidapi_freelancer': '',
+        'rapidapi_upwork': '',
         'resend': ''
     }
 
@@ -61,18 +62,19 @@ USER_SKILLS = {
     "document_conversion": 88,
     "python": 75,
     "sql": 70,
-    "automation": 80
+    "automation": 80,
+    "virtual_assistant": 85,
+    "customer_service": 80
 }
 
 # ============ RAPIDAPI FREELANCER INTEGRATION ============
 
-def fetch_freelancer_jobs_rapidapi(api_key, keywords=None, limit=25):
+def fetch_freelancer_jobs_rapidapi(api_key, keywords=None, limit=30):
     """Fetch jobs from Freelancer using RapidAPI"""
     if not api_key:
         return []
     
     try:
-        # RapidAPI Freelancer endpoint
         url = "https://freelancer-freelancer-v1.p.rapidapi.com/projects/0.1/projects/active/"
         
         headers = {
@@ -98,11 +100,10 @@ def fetch_freelancer_jobs_rapidapi(api_key, keywords=None, limit=25):
             projects = data.get("result", {}).get("projects", [])
             
             for project in projects:
-                # Extract budget information
+                # Extract budget
                 budget_min = project.get("budget", {}).get("minimum", 0)
                 budget_max = project.get("budget", {}).get("maximum", 0)
                 
-                # If no budget, try to get from bid stats
                 if budget_min == 0 and budget_max == 0:
                     bid_stats = project.get("bid_stats", {})
                     budget_min = bid_stats.get("minimum_bid", 0)
@@ -116,7 +117,7 @@ def fetch_freelancer_jobs_rapidapi(api_key, keywords=None, limit=25):
                     elif isinstance(skill, str):
                         skills.append(skill.lower())
                 
-                # Determine competition level based on bid count
+                # Competition level
                 bid_count = project.get("bid_stats", {}).get("bid_count", 0)
                 if bid_count > 20:
                     competition = "High"
@@ -144,68 +145,93 @@ def fetch_freelancer_jobs_rapidapi(api_key, keywords=None, limit=25):
             
             return jobs
         else:
-            st.warning(f"RapidAPI error: {response.status_code} - {response.text[:100]}")
             return []
             
-    except requests.exceptions.Timeout:
-        st.warning("RapidAPI request timed out")
-        return []
     except Exception as e:
-        st.warning(f"RapidAPI connection error: {str(e)[:100]}")
         return []
 
-def search_freelancer_by_category(api_key, category, limit=20):
-    """Search Freelancer jobs by category"""
+# ============ RAPIDAPI UPWORK INTEGRATION ============
+
+def fetch_upwork_jobs_rapidapi(api_key, category=None, limit=30):
+    """Fetch jobs from Upwork using RapidAPI"""
     if not api_key:
         return []
     
     try:
-        url = "https://freelancer-freelancer-v1.p.rapidapi.com/projects/0.1/projects/"
+        # Upwork API endpoint (using RapidAPI)
+        url = "https://upwork7.p.rapidapi.com/api/client/projects/search"
         
         headers = {
             "X-RapidAPI-Key": api_key,
-            "X-RapidAPI-Host": "freelancer-freelancer-v1.p.rapidapi.com"
+            "X-RapidAPI-Host": "upwork7.p.rapidapi.com",
+            "Content-Type": "application/json"
         }
         
         params = {
-            "query": category,
-            "limit": limit
+            "page": 1,
+            "per_page": limit
         }
+        
+        if category:
+            params["category"] = category
         
         response = requests.get(url, headers=headers, params=params, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
-            projects = data.get("result", {}).get("projects", [])
-            
             jobs = []
+            
+            projects = data.get("projects", []) if isinstance(data, dict) else data
+            
             for project in projects:
+                # Extract budget
+                budget = project.get("budget", {})
+                budget_min = budget.get("min", 0) if isinstance(budget, dict) else 0
+                budget_max = budget.get("max", 0) if isinstance(budget, dict) else 0
+                
+                # Extract skills
+                skills = project.get("skills", [])
+                if isinstance(skills, str):
+                    skills = [s.strip().lower() for s in skills.split(",")]
+                
                 jobs.append({
                     "id": str(project.get("id")),
                     "title": project.get("title", "Untitled"),
                     "description": project.get("description", "")[:500],
-                    "platform": "Freelancer",
-                    "budget_min": project.get("budget", {}).get("minimum", 0),
-                    "budget_max": project.get("budget", {}).get("maximum", 0),
-                    "skills_required": [s.get("name", "").lower() for s in project.get("skills", [])],
-                    "access_type": "open",
-                    "unlock_cost": "Free",
-                    "posted_date": datetime.now(),
-                    "client_rating": 0,
+                    "platform": "Upwork",
+                    "budget_min": budget_min,
+                    "budget_max": budget_max,
+                    "skills_required": skills,
+                    "access_type": "connect_required",
+                    "unlock_cost": "8-16 connects",
+                    "posted_date": datetime.fromisoformat(project.get("published_date", "")) if project.get("published_date") else datetime.now(),
+                    "client_rating": project.get("client", {}).get("rating", 0) if isinstance(project.get("client"), dict) else 0,
                     "competition_level": "Medium",
-                    "bid_count": 0,
-                    "url": "#"
+                    "bid_count": project.get("proposals_count", 0),
+                    "url": project.get("url", f"https://www.upwork.com/jobs/~{project.get('ciphertext', '')}")
                 })
+            
             return jobs
-        return []
+        else:
+            # Fallback to RSS if API fails
+            return fetch_upwork_rss_jobs()
+            
     except Exception as e:
-        return []
+        # Fallback to RSS
+        return fetch_upwork_rss_jobs()
 
-def fetch_upwork_jobs():
-    """Fetch jobs from Upwork RSS feed"""
+def fetch_upwork_rss_jobs(keywords=None):
+    """Fallback: Fetch jobs from Upwork RSS feed"""
     try:
         import feedparser
-        url = "https://www.upwork.com/ab/feed/jobs/rss"
+        base_url = "https://www.upwork.com/ab/feed/jobs/rss"
+        
+        if keywords:
+            query = "+".join(keywords) if isinstance(keywords, list) else keywords
+            url = f"{base_url}?q={query}"
+        else:
+            url = base_url
+        
         feed = feedparser.parse(url)
         jobs = []
         
@@ -243,25 +269,70 @@ def fetch_upwork_jobs():
     except Exception:
         return []
 
-def fetch_fiverr_jobs(api_key=None):
-    """Fetch jobs from Fiverr (if API available)"""
-    # Fiverr API is limited, returning sample for now
-    return []
+def fetch_upwork_by_category(api_key, category):
+    """Fetch Upwork jobs by specific category"""
+    categories = {
+        "data_entry": "Data Entry",
+        "virtual_assistant": "Virtual Assistant",
+        "excel": "Excel",
+        "research": "Research",
+        "admin_support": "Admin Support"
+    }
+    
+    cat_name = categories.get(category, category)
+    return fetch_upwork_jobs_rapidapi(api_key, cat_name)
 
-def fetch_all_jobs(rapidapi_key):
-    """Fetch jobs from all platforms"""
-    all_jobs = []
-    
-    # Fetch from Freelancer via RapidAPI
-    if rapidapi_key:
-        freelancer_jobs = fetch_freelancer_jobs_rapidapi(rapidapi_key, limit=30)
-        all_jobs.extend(freelancer_jobs)
-    
-    # Fetch from Upwork
-    upwork_jobs = fetch_upwork_jobs()
-    all_jobs.extend(upwork_jobs)
-    
-    return all_jobs
+# ============ SAMPLE DATA ============
+SAMPLE_JOBS = [
+    {
+        "id": "sample_1",
+        "title": "PDF-to-Excel Data Transfer",
+        "description": "Need accurate transfer of tables from PDF documents to Excel while preserving formatting.",
+        "platform": "Freelancer",
+        "budget_min": 6,
+        "budget_max": 16,
+        "skills_required": ["excel", "data_entry", "pdf_handling"],
+        "access_type": "unlock_required",
+        "unlock_cost": "$20 balance required",
+        "posted_date": datetime.now() - timedelta(days=1),
+        "client_rating": 4.5,
+        "competition_level": "Medium",
+        "bid_count": 12,
+        "url": "#"
+    },
+    {
+        "id": "sample_2",
+        "title": "Virtual Assistant for Admin Tasks",
+        "description": "Need a virtual assistant for data entry, email management, and scheduling.",
+        "platform": "Upwork",
+        "budget_min": 15,
+        "budget_max": 25,
+        "skills_required": ["virtual_assistant", "administrative", "email_management"],
+        "access_type": "connect_required",
+        "unlock_cost": "8 connects",
+        "posted_date": datetime.now() - timedelta(days=2),
+        "client_rating": 4.8,
+        "competition_level": "Medium",
+        "bid_count": 15,
+        "url": "#"
+    },
+    {
+        "id": "sample_3",
+        "title": "Excel Data Cleaning & Formatting",
+        "description": "Need to clean and format large Excel dataset for analysis.",
+        "platform": "Freelancer",
+        "budget_min": 30,
+        "budget_max": 60,
+        "skills_required": ["excel", "data_analysis", "data_cleaning"],
+        "access_type": "open",
+        "unlock_cost": "Free",
+        "posted_date": datetime.now() - timedelta(days=3),
+        "client_rating": 4.2,
+        "competition_level": "High",
+        "bid_count": 25,
+        "url": "#"
+    }
+]
 
 # ============ JOB SCORING FUNCTIONS ============
 
@@ -271,7 +342,7 @@ def calculate_match_score(job):
     matched_skills = []
     
     for skill in job.get("skills_required", []):
-        skill_lower = skill.lower().replace(" ", "_")
+        skill_lower = skill.lower().replace(" ", "_").replace("-", "_")
         if skill_lower in USER_SKILLS:
             total_score += USER_SKILLS[skill_lower]
             matched_skills.append(skill)
@@ -286,6 +357,8 @@ def calculate_match_score(job):
         title_lower = job.get("title", "").lower()
         if "excel" in title_lower or "data" in title_lower:
             match_percentage = 85
+        elif "virtual" in title_lower or "assistant" in title_lower:
+            match_percentage = 82
         elif "research" in title_lower:
             match_percentage = 80
         else:
@@ -297,7 +370,7 @@ def calculate_roi(job, match_score):
     """Calculate ROI score for bidding decision"""
     avg_budget = (job.get("budget_min", 0) + job.get("budget_max", 0)) / 2
     
-    comp_map = {"Low": 0.7, "Medium": 0.5, "High": 0.3}
+    comp_map = {"Low": 0.7, "Medium": 0.5, "High": 0.3, "Very High": 0.2}
     comp_factor = comp_map.get(job.get("competition_level", "Medium"), 0.5)
     
     win_probability = (match_score / 100) * comp_factor * 0.8
@@ -320,36 +393,38 @@ def calculate_roi(job, match_score):
     return round(roi_score, 1), win_probability, expected_value, cost
 
 def generate_proposal(job, match_score):
-    """Generate personalized proposal"""
-    if "PDF" in job["title"] or "Excel" in job["title"]:
+    """Generate personalized proposal based on job type"""
+    title_lower = job["title"].lower()
+    
+    if "excel" in title_lower or "data" in title_lower:
         return f"""Hello,
 
-I can accurately transfer the tables from your PDF documents into Excel while preserving the original structure and formatting.
+I can help with your {job['title']} project.
 
-My approach includes:
-• Extracting data using professional PDF tools and Excel
-• Verifying every row and column for accuracy
-• Maintaining the original table layout
-• Delivering a clean and organized .xlsx file
+My relevant skills include:
+• Excel data processing ({USER_SKILLS.get('excel', 90)}% proficiency)
+• Data entry with 99% accuracy
+• PDF to Excel conversion experience
+• Data cleaning and formatting
 
-I have {USER_SKILLS.get('data_entry', 85)}% proficiency in data entry and Excel.
+I deliver accurate, well-organized results within your timeline.
 
-Kind regards,
+Best regards,
 George Jabley
 TechWokx Freelancer"""
     
-    elif "Data Entry" in job["title"] or "Product" in job["title"]:
+    elif "virtual" in title_lower or "assistant" in title_lower:
         return f"""Hello,
 
-I am interested in assisting with your {job['title']} project.
+I am interested in your Virtual Assistant position.
 
-I can:
-• Research products from company websites
-• Collect accurate product information
-• Verify all entries for consistency
-• Deliver organized data
+I can help with:
+• Email management and calendar scheduling
+• Data entry and document preparation
+• Customer service and communication
+• Administrative support
 
-My background includes data management and research ({USER_SKILLS.get('research', 85)}% proficiency).
+I am organized, detail-oriented, and available during business hours.
 
 Best regards,
 George Jabley
@@ -360,7 +435,9 @@ TechWokx Freelancer"""
 
 I am very interested in your {job['title']} project.
 
-Based on my experience, I am confident I can deliver high-quality results.
+Based on my experience in data management, IT support, and administrative tasks, I am confident I can deliver high-quality results.
+
+I am available to start immediately.
 
 Best regards,
 George Jabley
@@ -389,41 +466,21 @@ def send_bid_notification(job, bid_amount):
     })
     return True
 
-# ============ SAMPLE DATA ============
-SAMPLE_JOBS = [
-    {
-        "id": "sample_1",
-        "title": "PDF-to-Excel Data Transfer",
-        "description": "Need accurate transfer of tables from PDF documents to Excel while preserving formatting.",
-        "platform": "Freelancer",
-        "budget_min": 6,
-        "budget_max": 16,
-        "skills_required": ["excel", "data_entry", "pdf_handling"],
-        "access_type": "unlock_required",
-        "unlock_cost": "$20 balance required",
-        "posted_date": datetime.now() - timedelta(days=1),
-        "client_rating": 4.5,
-        "competition_level": "Medium",
-        "bid_count": 12,
-        "url": "#"
-    },
-    {
-        "id": "sample_2",
-        "title": "Tally AR/AP Data Entry Support",
-        "description": "Looking for experienced data entry specialist for Tally accounting software.",
-        "platform": "Upwork",
-        "budget_min": 50,
-        "budget_max": 150,
-        "skills_required": ["data_entry", "excel", "administrative"],
-        "access_type": "connect_required",
-        "unlock_cost": "8 connects",
-        "posted_date": datetime.now() - timedelta(days=2),
-        "client_rating": 4.8,
-        "competition_level": "Low",
-        "bid_count": 5,
-        "url": "#"
-    }
-]
+def fetch_all_jobs():
+    """Fetch jobs from all platforms"""
+    all_jobs = []
+    
+    # Fetch from Freelancer via RapidAPI
+    if st.session_state.api_keys.get('rapidapi_freelancer'):
+        freelancer_jobs = fetch_freelancer_jobs_rapidapi(st.session_state.api_keys['rapidapi_freelancer'])
+        all_jobs.extend(freelancer_jobs)
+    
+    # Fetch from Upwork via RapidAPI
+    if st.session_state.api_keys.get('rapidapi_upwork'):
+        upwork_jobs = fetch_upwork_jobs_rapidapi(st.session_state.api_keys['rapidapi_upwork'])
+        all_jobs.extend(upwork_jobs)
+    
+    return all_jobs
 
 # ============ CSS ============
 st.markdown("""
@@ -513,8 +570,11 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown(f"👤 Skills: {len(USER_SKILLS)}")
-    if st.session_state.api_keys.get('rapidapi'):
-        st.markdown("🔌 RapidAPI: ✅ Connected")
+    
+    if st.session_state.api_keys.get('rapidapi_freelancer'):
+        st.markdown("🔵 Freelancer: ✅")
+    if st.session_state.api_keys.get('rapidapi_upwork'):
+        st.markdown("🟢 Upwork: ✅")
 
 # ============ API SETTINGS PAGE ============
 if st.session_state.page == 'api_settings':
@@ -522,57 +582,84 @@ if st.session_state.page == 'api_settings':
     st.markdown("---")
     
     st.info("""
-    **Get your RapidAPI Key for Freelancer:**
+    **Get your RapidAPI Keys:**
     1. Go to [RapidAPI Freelancer API](https://rapidapi.com/rockethearts/api/freelancer-freelancer-v1)
-    2. Subscribe to the API
-    3. Copy your X-RapidAPI-Key
+    2. Go to [RapidAPI Upwork API](https://rapidapi.com/upwork7/api/upwork7)
+    3. Subscribe to both APIs
+    4. Copy your X-RapidAPI-Key
     """)
     
     with st.form("api_keys_form"):
-        rapidapi_key = st.text_input(
+        freelancer_key = st.text_input(
             "RapidAPI Key (Freelancer)",
-            value=st.session_state.api_keys.get('rapidapi', ''),
+            value=st.session_state.api_keys.get('rapidapi_freelancer', ''),
             type="password",
-            placeholder="Enter your X-RapidAPI-Key"
+            placeholder="Enter your Freelancer RapidAPI key"
+        )
+        
+        upwork_key = st.text_input(
+            "RapidAPI Key (Upwork)",
+            value=st.session_state.api_keys.get('rapidapi_upwork', ''),
+            type="password",
+            placeholder="Enter your Upwork RapidAPI key"
         )
         
         if st.form_submit_button("Save API Keys", type="primary"):
-            st.session_state.api_keys['rapidapi'] = rapidapi_key
-            st.success("API keys saved! You can now fetch real jobs.")
+            st.session_state.api_keys['rapidapi_freelancer'] = freelancer_key
+            st.session_state.api_keys['rapidapi_upwork'] = upwork_key
+            st.success("API keys saved!")
     
-    if st.session_state.api_keys.get('rapidapi'):
+    if st.session_state.api_keys.get('rapidapi_freelancer') or st.session_state.api_keys.get('rapidapi_upwork'):
         st.markdown("---")
-        st.markdown("### Test API Connection")
-        if st.button("Test Freelancer API"):
-            with st.spinner("Testing..."):
-                jobs = fetch_freelancer_jobs_rapidapi(st.session_state.api_keys['rapidapi'], limit=5)
-                if jobs:
-                    st.success(f"✅ API working! Found {len(jobs)} jobs.")
+        st.markdown("### Test API Connections")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Test Freelancer API"):
+                if st.session_state.api_keys.get('rapidapi_freelancer'):
+                    with st.spinner("Testing..."):
+                        jobs = fetch_freelancer_jobs_rapidapi(st.session_state.api_keys['rapidapi_freelancer'], limit=5)
+                        if jobs:
+                            st.success(f"✅ Freelancer API working! Found {len(jobs)} jobs.")
+                        else:
+                            st.warning("⚠️ Freelancer API returned no jobs.")
                 else:
-                    st.warning("⚠️ API returned no jobs. Check your API key.")
+                    st.error("Please enter Freelancer API key first")
+        
+        with col2:
+            if st.button("Test Upwork API"):
+                if st.session_state.api_keys.get('rapidapi_upwork'):
+                    with st.spinner("Testing..."):
+                        jobs = fetch_upwork_jobs_rapidapi(st.session_state.api_keys['rapidapi_upwork'], limit=5)
+                        if jobs:
+                            st.success(f"✅ Upwork API working! Found {len(jobs)} jobs.")
+                        else:
+                            st.warning("⚠️ Upwork API returned no jobs. Using RSS fallback.")
+                else:
+                    st.error("Please enter Upwork API key first")
 
 # ============ FREELANCE INTELLIGENCE PAGE ============
 if st.session_state.page == 'freelance_intel':
     st.markdown('<div class="section-header">🤖 Freelance Intelligence Agent</div>', unsafe_allow_html=True)
-    st.caption("AI-powered job matching using RapidAPI for Freelancer, Upwork RSS")
+    st.caption("AI-powered job matching using RapidAPI for Freelancer & Upwork")
     st.markdown("---")
     
     col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
-        keywords = st.text_input("Keywords", placeholder="data entry, excel, research")
+        keywords = st.text_input("Keywords", placeholder="data entry, excel, virtual assistant")
     with col2:
         platform_filter = st.selectbox("Platform", ["All", "Freelancer", "Upwork"])
     with col3:
         min_match = st.slider("Min Match %", 0, 100, 50)
     with col4:
         if st.button("🔄 Fetch Jobs", type="primary"):
-            with st.spinner("Fetching jobs from Freelancer (RapidAPI) and Upwork..."):
-                all_jobs = fetch_all_jobs(st.session_state.api_keys.get('rapidapi', ''))
+            with st.spinner("Fetching jobs from Freelancer and Upwork via RapidAPI..."):
+                all_jobs = fetch_all_jobs()
                 if all_jobs:
                     st.session_state.jobs = all_jobs
                     st.success(f"Fetched {len(all_jobs)} jobs!")
                 else:
-                    st.warning("Using sample data. Configure RapidAPI key to fetch real jobs.")
+                    st.warning("Using sample data. Configure API keys to fetch real jobs.")
                     st.session_state.jobs = SAMPLE_JOBS
                 st.rerun()
     
@@ -617,6 +704,8 @@ if st.session_state.page == 'freelance_intel':
                     st.markdown(f"**Access:** {job['access_type']} | {job['unlock_cost']}")
                     if job.get('bid_count'):
                         st.markdown(f"**Bids:** {job['bid_count']}")
+                    if job.get('url') and job['url'] != "#":
+                        st.markdown(f"**Link:** [View Job]({job['url']})")
                 
                 with col2:
                     st.markdown(f"### {recommendation}")
@@ -624,6 +713,7 @@ if st.session_state.page == 'freelance_intel':
                     st.markdown(f"**ROI Score:** {roi_score}/100")
                     st.markdown(f"**Win Probability:** {win_prob*100:.0f}%")
                     st.markdown(f"**Expected Value:** ${expected_value:.0f}")
+                    st.markdown(f"**Bid Cost:** ${cost:.2f}")
                 
                 if recommendation == "🟢 Bid Now" or recommendation == "🟡 Consider":
                     st.markdown("---")
@@ -631,17 +721,19 @@ if st.session_state.page == 'freelance_intel':
                     proposal = generate_proposal(job, match_score)
                     st.text_area("Proposal", proposal, height=150)
                     
-                    bid_amount = st.number_input(
-                        "Bid Amount ($)",
-                        min_value=max(5, job['budget_min']),
-                        max_value=job['budget_max'] if job['budget_max'] > 0 else 100,
-                        value=max(job['budget_min'], (job['budget_min'] + job['budget_max'])//2) if job['budget_max'] > 0 else 25,
-                        key=f"bid_{job['id']}"
-                    )
-                    
-                    if st.button("📤 Submit Bid", key=f"submit_{job['id']}"):
-                        send_bid_notification(job, bid_amount)
-                        st.success(f"✅ Bid recorded for {job['title']}!")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        bid_amount = st.number_input(
+                            "Bid Amount ($)",
+                            min_value=max(5, job['budget_min']),
+                            max_value=job['budget_max'] if job['budget_max'] > 0 else 100,
+                            value=max(job['budget_min'], (job['budget_min'] + job['budget_max'])//2) if job['budget_max'] > 0 else 25,
+                            key=f"bid_{job['id']}"
+                        )
+                    with col2:
+                        if st.button("📤 Submit Bid", key=f"submit_{job['id']}"):
+                            send_bid_notification(job, bid_amount)
+                            st.success(f"✅ Bid recorded for {job['title']}!")
 
 # ============ BID ROI ANALYZER ============
 if st.session_state.page == 'bid_roi':
@@ -694,6 +786,7 @@ if st.session_state.page == 'bid_history':
                 <strong>📌 {bid['job_title']}</strong><br>
                 Platform: {bid['platform']} | Bid: ${bid['bid_amount']}<br>
                 Status: {bid['status']} | Date: {bid['date'].strftime('%Y-%m-%d %H:%M')}
+                <br><a href="{bid.get('job_url', '#')}" target="_blank">View Job</a>
             </div>
             """, unsafe_allow_html=True)
     else:
@@ -721,8 +814,9 @@ if st.session_state.page == 'dashboard':
     with col3:
         st.markdown(f"<div class='metric-card'><div class='metric-value'>{total_bids}</div><div class='metric-label'>Bids Placed</div></div>", unsafe_allow_html=True)
     with col4:
-        rapidapi_status = "✅" if st.session_state.api_keys.get('rapidapi') else "❌"
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{rapidapi_status}</div><div class='metric-label'>RapidAPI</div></div>", unsafe_allow_html=True)
+        freelancer_status = "✅" if st.session_state.api_keys.get('rapidapi_freelancer') else "❌"
+        upwork_status = "✅" if st.session_state.api_keys.get('rapidapi_upwork') else "❌"
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{freelancer_status} {upwork_status}</div><div class='metric-label'>API Status</div></div>", unsafe_allow_html=True)
 
 # ============ ANALYTICS ============
 if st.session_state.page == 'analytics':
@@ -734,6 +828,12 @@ if st.session_state.page == 'analytics':
     
     st.subheader("Match Score Distribution")
     st.bar_chart(pd.DataFrame({"Match Scores": match_scores}))
+    
+    st.subheader("Platform Breakdown")
+    platform_counts = {}
+    for j in display_jobs:
+        platform_counts[j["platform"]] = platform_counts.get(j["platform"], 0) + 1
+    st.write(platform_counts)
 
 # ============ SKILLS PROFILE ============
 if st.session_state.page == 'settings':
