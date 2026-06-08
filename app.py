@@ -1,13 +1,13 @@
-# app.py - Complete working app with light theme
+# app.py - Complete working app with all pages
 import streamlit as st
 
 st.set_page_config(
     page_title="TechWokx Lead Intelligence",
-    page_icon=":mag:",
+    page_icon="🔍",
     layout="wide"
 )
 
-# Light theme CSS - no syntax errors
+# Light theme CSS
 st.markdown("""
 <style>
 .stApp {
@@ -18,12 +18,32 @@ st.markdown("""
     background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
 }
 
-[data-testid="stSidebar"] * {
+[data-testid="stSidebar"] .stMarkdown,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] div {
     color: #e2e8f0 !important;
 }
 
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
+[data-testid="stSidebar"] h1, 
+[data-testid="stSidebar"] h2, 
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] h4 {
     color: #fbbf24 !important;
+}
+
+[data-testid="stSidebar"] .stButton button {
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24 !important;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    text-align: left;
+    width: 100%;
+    margin: 2px 0;
+}
+
+[data-testid="stSidebar"] .stButton button:hover {
+    background: rgba(251, 191, 36, 0.3);
+    border-color: #fbbf24;
 }
 
 .main-header {
@@ -113,6 +133,7 @@ st.markdown("""
 .activity-time {
     color: #94a3b8;
     font-size: 0.7rem;
+    margin-top: 0.25rem;
 }
 
 .section-header {
@@ -135,6 +156,7 @@ st.markdown("""
     border-radius: 12px;
     padding: 0.75rem;
     text-align: center;
+    margin-top: 1rem;
 }
 
 .plan-badge * {
@@ -173,7 +195,7 @@ st.markdown("""
 
 .stButton > button {
     background: linear-gradient(135deg, #fbbf24, #f59e0b);
-    color: #0f172a;
+    color: #0f172a !important;
     font-weight: 600;
     border: none;
     border-radius: 8px;
@@ -181,44 +203,82 @@ st.markdown("""
 
 .stButton > button:hover {
     background: linear-gradient(135deg, #f59e0b, #d97706);
-    color: white;
+    color: white !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
+# Initialize session state
+if 'page' not in st.session_state:
+    st.session_state.page = 'dashboard'
+
 # Sidebar navigation
 with st.sidebar:
-    st.markdown("### :mag: TechWokx")
+    st.markdown("### 🔍 TechWokx")
     st.markdown("#### Lead Intelligence Engine")
     st.markdown("---")
     
-    pages = {
-        "Dashboard": "dashboard",
-        "Company Research": "company_research",
-        "Bulk Research": "bulk_research",
-        "Website Audit": "website_audit",
-        "Email Security": "email_security",
-        "DNS Audit": "dns_audit",
-        "AI Intelligence": "ai_intelligence",
-        "Proposals": "proposals",
-        "CRM": "crm",
-        "Reports": "reports",
-        "Settings": "settings"
-    }
+    # Navigation buttons
+    if st.button("🏠 Dashboard", key="nav_dashboard", use_container_width=True):
+        st.session_state.page = 'dashboard'
+        st.rerun()
     
-    for label, key in pages.items():
-        if st.button(label, key=key, use_container_width=True):
-            st.session_state.page = key
-            st.rerun()
+    if st.button("🔍 Company Research", key="nav_research", use_container_width=True):
+        st.session_state.page = 'company_research'
+        st.rerun()
+    
+    if st.button("📊 Bulk Research", key="nav_bulk", use_container_width=True):
+        st.session_state.page = 'bulk_research'
+        st.rerun()
     
     st.markdown("---")
-    st.markdown('<div class="plan-badge">🚀 Pro Plan<br><small>Unlimited leads</small></div>', unsafe_allow_html=True)
+    
+    if st.button("🌐 Website Audit", key="nav_website", use_container_width=True):
+        st.session_state.page = 'website_audit'
+        st.rerun()
+    
+    if st.button("📧 Email Security", key="nav_email", use_container_width=True):
+        st.session_state.page = 'email_security'
+        st.rerun()
+    
+    if st.button("🔒 DNS Audit", key="nav_dns", use_container_width=True):
+        st.session_state.page = 'dns_audit'
+        st.rerun()
+    
+    st.markdown("---")
+    
+    if st.button("🧠 AI Intelligence", key="nav_ai", use_container_width=True):
+        st.session_state.page = 'ai_intelligence'
+        st.rerun()
+    
+    if st.button("📄 Proposals", key="nav_proposals", use_container_width=True):
+        st.session_state.page = 'proposals'
+        st.rerun()
+    
+    if st.button("👥 CRM", key="nav_crm", use_container_width=True):
+        st.session_state.page = 'crm'
+        st.rerun()
+    
+    if st.button("📈 Reports", key="nav_reports", use_container_width=True):
+        st.session_state.page = 'reports'
+        st.rerun()
+    
+    if st.button("⚙️ Settings", key="nav_settings", use_container_width=True):
+        st.session_state.page = 'settings'
+        st.rerun()
+    
+    st.markdown("---")
+    st.markdown("""
+    <div class="plan-badge">
+        🚀 Pro Plan<br>
+        <small>Unlimited leads & audits</small>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Get current page
-page = st.session_state.get("page", "dashboard")
+# ============ PAGE CONTENT ============
 
-# ============ DASHBOARD PAGE ============
-if page == "dashboard":
+# DASHBOARD PAGE
+if st.session_state.page == 'dashboard':
     st.markdown("""
     <div class="welcome-card">
         <h2>Welcome back, Emran!</h2>
@@ -270,22 +330,19 @@ if page == "dashboard":
     
     with col1:
         st.markdown('<div class="section-header">📊 Lead Distribution</div>', unsafe_allow_html=True)
-        
-        dist_data = [
-            ("Hot (90-100)", 7.5),
-            ("Warm (70-89)", 32.1),
-            ("Cold (40-69)", 45.3),
-            ("Very Cold (20-39)", 10.2),
-            ("Bad (0-19)", 4.9)
-        ]
-        
-        for label, val in dist_data:
-            st.write(f"{label}: {val}%")
-            st.progress(val / 100)
+        st.write("Hot (90-100): 7.5%")
+        st.progress(0.075)
+        st.write("Warm (70-89): 32.1%")
+        st.progress(0.321)
+        st.write("Cold (40-69): 45.3%")
+        st.progress(0.453)
+        st.write("Very Cold (20-39): 10.2%")
+        st.progress(0.102)
+        st.write("Bad (0-19): 4.9%")
+        st.progress(0.049)
     
     with col2:
         st.markdown('<div class="section-header">📝 Recent Activity</div>', unsafe_allow_html=True)
-        
         st.markdown("""
         <div class="activity-item">
             <div class="activity-action">Airside Hotel audited</div>
@@ -304,44 +361,9 @@ if page == "dashboard":
             <div class="activity-time">3 hours ago</div>
         </div>
         """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="section-header">🏆 Top Opportunities</div>', unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([2, 1, 2])
-    with col1:
-        st.write("**Company**")
-    with col2:
-        st.write("**Score**")
-    with col3:
-        st.write("**Value**")
-    
-    st.markdown("---")
-    
-    opportunities = [
-        ("Airside Hotel", 92, "$5,000 - $10,000"),
-        ("Ecobank Ghana", 87, "$3,000 - $7,000"),
-        ("XYZ Logistics", 85, "$2,500 - $5,000"),
-        ("Melcom Ltd", 81, "$1,500 - $3,000")
-    ]
-    
-    for company, score, value in opportunities:
-        col1, col2, col3 = st.columns([2, 1, 2])
-        with col1:
-            st.write(company)
-        with col2:
-            if score >= 90:
-                st.markdown(f'<span class="score-hot">{score}</span>', unsafe_allow_html=True)
-            elif score >= 80:
-                st.markdown(f'<span class="score-warm">{score}</span>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<span class="score-good">{score}</span>', unsafe_allow_html=True)
-        with col3:
-            st.write(value)
 
-# ============ COMPANY RESEARCH PAGE ============
-elif page == "company_research":
+# COMPANY RESEARCH PAGE
+elif st.session_state.page == 'company_research':
     st.markdown('<div class="section-header">🔍 Company Research</div>', unsafe_allow_html=True)
     st.caption("Research any company and get instant lead scoring")
     st.markdown("---")
@@ -352,10 +374,10 @@ elif page == "company_research":
     with col2:
         website = st.text_input("Website (optional)", placeholder="e.g. nyahoclinic.com")
     
-    if st.button("Research Company", type="primary"):
+    if st.button("🔍 Research Company", type="primary"):
         if company:
             with st.spinner(f"Researching {company}..."):
-                st.success("Research complete!")
+                st.success(f"✅ Research complete for {company}!")
                 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -380,45 +402,50 @@ elif page == "company_research":
         else:
             st.warning("Please enter a company name")
 
-# ============ BULK RESEARCH PAGE ============
-elif page == "bulk_research":
+# BULK RESEARCH PAGE
+elif st.session_state.page == 'bulk_research':
     st.markdown('<div class="section-header">📊 Bulk Company Research</div>', unsafe_allow_html=True)
     st.caption("Research multiple companies at once")
     st.markdown("---")
     
-    companies = st.text_area("Company Names (one per line)", height=150, placeholder="Nyaho Medical Centre\nMTN Ghana\nGCB Bank")
+    companies = st.text_area("Company Names (one per line)", height=150, 
+                            placeholder="Nyaho Medical Centre\nMTN Ghana\nGCB Bank\nKasapreko Company Limited")
     
-    if st.button("Start Bulk Research", type="primary"):
+    if st.button("🚀 Start Bulk Research", type="primary"):
         if companies:
             lines = [c.strip() for c in companies.split("\n") if c.strip()]
             progress = st.progress(0)
             for i, c in enumerate(lines):
                 progress.progress((i + 1) / len(lines))
-            st.success(f"Researched {len(lines)} companies!")
-            st.dataframe([{"Company": c, "Lead Score": "72/100", "Status": "Warm"} for c in lines], use_container_width=True)
+            st.success(f"✅ Researched {len(lines)} companies!")
+            
+            results = []
+            for c in lines:
+                results.append({"Company": c, "Lead Score": "72/100", "Status": "Warm", "Email": f"info@{c.lower().replace(' ', '')}.com"})
+            st.dataframe(results, use_container_width=True)
         else:
             st.warning("Please enter company names")
 
-# ============ WEBSITE AUDIT PAGE ============
-elif page == "website_audit":
+# WEBSITE AUDIT PAGE
+elif st.session_state.page == 'website_audit':
     st.markdown('<div class="section-header">🌐 Website Audit</div>', unsafe_allow_html=True)
     st.caption("Comprehensive security and performance audit")
     st.markdown("---")
     
     url = st.text_input("Website URL", placeholder="https://example.com")
     
-    if st.button("Run Website Audit", type="primary"):
+    if st.button("🔍 Run Website Audit", type="primary"):
         if url:
             with st.spinner(f"Auditing {url}..."):
-                st.success("Audit complete!")
+                st.success("✅ Audit complete!")
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("""
                     <div class="data-card">
                         <h4>SSL Certificate</h4>
-                        <p>✅ Valid</p>
+                        <p>✅ Valid SSL Certificate</p>
                         <p>📅 Expires in 180 days</p>
-                        <p>🔒 TLS 1.3 supported</p>
+                        <p>🔒 TLS 1.3 Supported</p>
                     </div>
                     """, unsafe_allow_html=True)
                 with col2:
@@ -433,18 +460,18 @@ elif page == "website_audit":
         else:
             st.warning("Please enter a URL")
 
-# ============ EMAIL SECURITY PAGE ============
-elif page == "email_security":
+# EMAIL SECURITY PAGE
+elif st.session_state.page == 'email_security':
     st.markdown('<div class="section-header">📧 Email Security Audit</div>', unsafe_allow_html=True)
     st.caption("Check SPF, DKIM, and DMARC records")
     st.markdown("---")
     
     domain = st.text_input("Domain", placeholder="example.com")
     
-    if st.button("Check Email Security", type="primary"):
+    if st.button("🔍 Check Email Security", type="primary"):
         if domain:
             with st.spinner(f"Checking {domain}..."):
-                st.success("Security check complete!")
+                st.success("✅ Security check complete!")
                 st.markdown(f"""
                 <div class="data-card">
                     <h4>Email Security Report for {domain}</h4>
@@ -457,18 +484,18 @@ elif page == "email_security":
         else:
             st.warning("Please enter a domain")
 
-# ============ DNS AUDIT PAGE ============
-elif page == "dns_audit":
+# DNS AUDIT PAGE
+elif st.session_state.page == 'dns_audit':
     st.markdown('<div class="section-header">🔒 DNS Audit</div>', unsafe_allow_html=True)
     st.caption("Check DNS records and configuration")
     st.markdown("---")
     
     domain = st.text_input("Domain", placeholder="example.com")
     
-    if st.button("Run DNS Audit", type="primary"):
+    if st.button("🔍 Run DNS Audit", type="primary"):
         if domain:
             with st.spinner(f"Auditing {domain}..."):
-                st.success("DNS audit complete!")
+                st.success("✅ DNS audit complete!")
                 st.markdown(f"""
                 <div class="data-card">
                     <h4>DNS Records for {domain}</h4>
@@ -481,15 +508,15 @@ elif page == "dns_audit":
         else:
             st.warning("Please enter a domain")
 
-# ============ AI INTELLIGENCE PAGE ============
-elif page == "ai_intelligence":
+# AI INTELLIGENCE PAGE
+elif st.session_state.page == 'ai_intelligence':
     st.markdown('<div class="section-header">🧠 AI Intelligence</div>', unsafe_allow_html=True)
     st.caption("AI-powered lead scoring and insights")
     st.markdown("---")
     
-    if st.button("Generate AI Insights", type="primary"):
+    if st.button("🤖 Generate AI Insights", type="primary"):
         with st.spinner("Analyzing leads..."):
-            st.success("AI analysis complete!")
+            st.success("✅ AI analysis complete!")
             st.markdown("""
             <div class="data-card">
                 <h4>Key Insights</h4>
@@ -500,8 +527,8 @@ elif page == "ai_intelligence":
             </div>
             """, unsafe_allow_html=True)
 
-# ============ PROPOSALS PAGE ============
-elif page == "proposals":
+# PROPOSALS PAGE
+elif st.session_state.page == 'proposals':
     st.markdown('<div class="section-header">📄 Proposal Generator</div>', unsafe_allow_html=True)
     st.caption("Create professional proposals for your leads")
     st.markdown("---")
@@ -512,60 +539,60 @@ elif page == "proposals":
         client_email = st.text_input("Client Email")
     with col2:
         proposal_type = st.selectbox("Proposal Type", ["Email Security", "Website Audit", "IT Infrastructure"])
-        proposal_value = st.selectbox("Package", ["Basic", "Professional", "Enterprise"])
+        proposal_value = st.selectbox("Package", ["Basic - $1,500", "Professional - $3,000", "Enterprise - $5,000"])
     
-    if st.button("Generate Proposal", type="primary"):
+    if st.button("📄 Generate Proposal", type="primary"):
         if client_name:
-            st.success("Proposal generated!")
+            st.success("✅ Proposal generated!")
             st.markdown(f"""
             <div class="data-card">
                 <h4>Proposal for {client_name}</h4>
                 <p><strong>Service:</strong> {proposal_type}</p>
                 <p><strong>Package:</strong> {proposal_value}</p>
-                <p><strong>Value:</strong> $2,500 - $5,000</p>
                 <p><strong>Next Steps:</strong> Schedule discovery call</p>
+                <p><strong>Contact:</strong> {client_email}</p>
             </div>
             """, unsafe_allow_html=True)
         else:
             st.warning("Please enter client name")
 
-# ============ CRM PAGE ============
-elif page == "crm":
+# CRM PAGE
+elif st.session_state.page == 'crm':
     st.markdown('<div class="section-header">👥 CRM Dashboard</div>', unsafe_allow_html=True)
     st.caption("Manage your leads and customers")
     st.markdown("---")
     
     crm_data = [
-        {"Company": "Airside Hotel", "Contact": "John Doe", "Lead Score": 92, "Status": "Hot", "Value": "$10,000"},
-        {"Company": "Ecobank Ghana", "Contact": "Jane Smith", "Lead Score": 87, "Status": "Warm", "Value": "$7,000"},
-        {"Company": "XYZ Logistics", "Contact": "Mike Johnson", "Lead Score": 85, "Status": "Warm", "Value": "$5,000"},
-        {"Company": "Melcom Ltd", "Contact": "Sarah Adams", "Lead Score": 81, "Status": "Warm", "Value": "$3,000"},
+        {"Company": "Airside Hotel", "Contact": "John Doe", "Email": "john@airside.com", "Lead Score": 92, "Status": "Hot", "Value": "$10,000"},
+        {"Company": "Ecobank Ghana", "Contact": "Jane Smith", "Email": "jane@ecobank.com", "Lead Score": 87, "Status": "Warm", "Value": "$7,000"},
+        {"Company": "XYZ Logistics", "Contact": "Mike Johnson", "Email": "mike@xyz.com", "Lead Score": 85, "Status": "Warm", "Value": "$5,000"},
+        {"Company": "Melcom Ltd", "Contact": "Sarah Adams", "Email": "sarah@melcom.com", "Lead Score": 81, "Status": "Warm", "Value": "$3,000"},
     ]
     st.dataframe(crm_data, use_container_width=True)
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Add Lead", use_container_width=True):
-            st.info("Add lead feature coming soon")
+        if st.button("➕ Add Lead", use_container_width=True):
+            st.info("Add lead form would appear here")
     with col2:
-        if st.button("Export Data", use_container_width=True):
-            st.success("Export started")
+        if st.button("📊 Export CRM Data", use_container_width=True):
+            st.success("Exporting CRM data...")
 
-# ============ REPORTS PAGE ============
-elif page == "reports":
+# REPORTS PAGE
+elif st.session_state.page == 'reports':
     st.markdown('<div class="section-header">📈 Reports</div>', unsafe_allow_html=True)
     st.caption("Generate detailed reports on your lead intelligence")
     st.markdown("---")
     
     col1, col2 = st.columns(2)
     with col1:
-        report_type = st.selectbox("Report Type", ["Lead Summary", "Conversion Report", "Activity Report"])
+        report_type = st.selectbox("Report Type", ["Lead Summary", "Conversion Report", "Activity Report", "Revenue Report"])
     with col2:
-        date_range = st.selectbox("Date Range", ["Last 7 days", "Last 30 days", "Last quarter"])
+        date_range = st.selectbox("Date Range", ["Last 7 days", "Last 30 days", "Last quarter", "Year to date"])
     
-    if st.button("Generate Report", type="primary"):
+    if st.button("📊 Generate Report", type="primary"):
         with st.spinner("Generating report..."):
-            st.success(f"{report_type} generated for {date_range}!")
+            st.success(f"✅ {report_type} generated for {date_range}!")
             st.markdown("""
             <div class="data-card">
                 <h4>Report Summary</h4>
@@ -573,36 +600,37 @@ elif page == "reports":
                 <p>🎯 Conversion Rate: 23.3%</p>
                 <p>💰 Pipeline Value: $32,500</p>
                 <p>⭐ Hot Leads: 184</p>
+                <p>📧 Emails Sent: 1,247</p>
             </div>
             """, unsafe_allow_html=True)
 
-# ============ SETTINGS PAGE ============
-elif page == "settings":
+# SETTINGS PAGE
+elif st.session_state.page == 'settings':
     st.markdown('<div class="section-header">⚙️ Settings</div>', unsafe_allow_html=True)
     st.caption("Configure API keys and system settings")
     st.markdown("---")
     
-    st.markdown("### API Configuration")
+    st.markdown("### 🔑 API Configuration")
     
     col1, col2 = st.columns(2)
     with col1:
-        st.text_input("OpenAI API Key", type="password", placeholder="sk-...", key="openai_key")
-        st.text_input("Anthropic API Key", type="password", placeholder="sk-ant-...", key="anthropic_key")
+        st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
+        st.text_input("Anthropic API Key", type="password", placeholder="sk-ant-...")
     with col2:
-        st.text_input("Google Maps API Key", type="password", placeholder="AIzaSy...", key="google_key")
-        st.text_input("Resend API Key", type="password", placeholder="re_...", key="resend_key")
+        st.text_input("Google Maps API Key", type="password", placeholder="AIzaSy...")
+        st.text_input("Resend API Key", type="password", placeholder="re_...")
     
-    st.markdown("### Preferences")
+    st.markdown("### ⚙️ Preferences")
     
     col1, col2 = st.columns(2)
     with col1:
-        st.selectbox("Default Country", ["Ghana", "Nigeria", "Kenya", "South Africa"], key="country")
+        st.selectbox("Default Country", ["Ghana", "Nigeria", "Kenya", "South Africa"])
     with col2:
-        st.selectbox("Email Notifications", ["Daily", "Weekly", "Never"], key="notifications")
+        st.selectbox("Email Notifications", ["Daily", "Weekly", "Never"])
     
-    if st.button("Save Settings", type="primary"):
-        st.success("Settings saved successfully!")
+    if st.button("💾 Save Settings", type="primary"):
+        st.success("✅ Settings saved successfully!")
 
 # Footer
 st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
-st.caption(":copyright: 2024 TechWokx Ghana | Light Theme Active")
+st.caption("© 2024 TechWokx Ghana | Light Theme Active")
