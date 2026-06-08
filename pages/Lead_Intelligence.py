@@ -1,10 +1,10 @@
-import sys, os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from dotenv import load_dotenv
-load_dotenv()
-import streamlit as st
-from modules.theme import THEME_CSS
-st.markdown(THEME_CSS, unsafe_allow_html=True)
+# NEW (safe)
+try:
+    from modules.theme import THEME_CSS
+    st.markdown(THEME_CSS, unsafe_allow_html=True)
+except Exception:
+    # Fallback - no theme styling
+    pass
 from modules.ai_analysis import generate_ai_analysis
 from modules.crm import get_all_companies, get_company, log_activity
 import os
