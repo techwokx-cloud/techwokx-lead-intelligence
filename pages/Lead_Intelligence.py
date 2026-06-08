@@ -1,107 +1,292 @@
-# NEW (safe)
-try:
-    from modules.theme import THEME_CSS
-    st.markdown(THEME_CSS, unsafe_allow_html=True)
-except Exception:
-    # Fallback - no theme styling
-    pass
-from modules.ai_analysis import generate_ai_analysis
-from modules.crm import get_all_companies, get_company, log_activity
+# pages/Lead_Intelligence.py
+import sys
 import os
 
-st.markdown("# 🧠 Lead Intelligence")
-st.caption("AI-powered analysis — risks, opportunities and recommended actions.")
-st.markdown("---")
+# Add parent directory to path FIRST
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-has_ai = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY"))
-provider = "claude" if os.getenv("ANTHROPIC_API_KEY") else "openai"
+# Import Streamlit FIRST
+import streamlit as st
 
-if not has_ai:
-    st.warning("⚠️ No AI API key set. Add keys in **Settings**. Fallback analysis will be used.")
+# Set page config (must be first Streamlit command)
+st.set_page_config(
+    page_title="Lead Intelligence",
+    page_icon="🧠",
+    layout="wide"
+)
 
-tab1, tab2 = st.tabs(["From Last Research", "Select from CRM"])
+# Now import other modules
+from dotenv import load_dotenv
+load_dotenv()
 
-with tab1:
-    if "last_research" in st.session_state:
-        result = st.session_state["last_research"]
-        lead   = st.session_state.get("last_lead_score")
-        c1,c2  = st.columns([3,1])
-        with c1: st.info(f"Ready to analyse: **{result.company_name}**  |  Score: **{lead.total if lead else '—'}/100**")
-        with c2:
-            if st.button("🤖 Run Analysis", type="primary", use_container_width=True):
-                with st.spinner("Generating AI analysis..."):
-                    ai = generate_ai_analysis(result, result.dns_result, result.website_result, lead, provider=provider)
-                st.session_state["last_ai"] = ai
-                if "last_company_id" in st.session_state:
-                    log_activity(st.session_state["last_company_id"], "AI Analysis", f"Urgency: {ai.get('urgency','—')}")
-    else:
-        st.markdown("""<div class="empty-state"><div class="empty-state-icon">🔍</div>
-            <div class="empty-state-title">No research loaded</div>
-            <div class="empty-state-sub">Run a Company Research first, then return here for AI analysis</div>
-        </div>""", unsafe_allow_html=True)
-
-with tab2:
-    companies = get_all_companies()
-    if companies:
-        opts = {f"{c.company_name} — {c.lead_status or 'Cold'} — {int(c.lead_score or 0)}/100": c.id for c in companies}
-        sel = st.selectbox("Choose company", list(opts.keys()))
-        if st.button("🤖 Analyse", type="primary"):
-            co = get_company(opts[sel])
-            class R:
-                company_name=co.company_name; website=co.website or ""; domain=(co.website or "").replace("https://","").replace("http://","").replace("www.","").split("/")[0]
-                phone=co.phone or ""; email=co.email or ""; address=co.address or ""; description=co.description or ""; confidence_score=co.confidence_score or 0; dns_result=None; website_result=None
-            class L:
-                total=int(co.lead_score or 0); status=co.lead_status or "Cold"; rules=[]
-            with st.spinner("Generating..."):
-                ai = generate_ai_analysis(R(), None, None, L(), provider=provider)
-            st.session_state["last_ai"] = ai
-            log_activity(opts[sel], "AI Analysis", "Generated from CRM")
-    else:
-        st.caption("No companies in CRM yet.")
-
-# ── Results ──
-if "last_ai" not in st.session_state:
+# Import CRM functions
+try:
+    from modules.crm import get_all_companies, get_company, log_activity
+    from modules.database import get_session
+    from datetime import datetime
+    import pandas as pd
+    CRM_AVAILABLE = True
+except ImportError as e:
+    CRM_AVAILABLE = False
+    st.error(f"⚠️ CRM module not available: {e}")
     st.stop()
 
-ai = st.session_state["last_ai"]
+# Page title
+st.markdown("# 🧠 Lead Intelligence")
+st.caption("AI-powered insights and recommendations for your leads")
 st.markdown("---")
 
-urgency = ai.get("urgency","MEDIUM")
-urg_color = {"HIGH":"#ef4444","MEDIUM":"#f97316","LOW":"#22c55e"}.get(urgency,"#f97316")
-st.markdown(f'<div style="background:rgba(0,0,0,0.2);border-left:4px solid {urg_color};padding:0.75rem 1rem;border-radius:0 8px 8px 0;margin-bottom:1.5rem"><span style="color:{urg_color};font-weight:700;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em">Urgency: {urgency}</span></div>', unsafe_allow_html=True)
+# Initialize session state for theme
+if 'proposal_light_mode' not in st.session_state:
+    st.session_state.proposal_light_mode = False
 
-c1,c2 = st.columns(2)
-with c1:
-    st.markdown('<div class="data-card"><h4>Company Summary</h4>', unsafe_allow_html=True)
-    st.write(ai.get("company_summary","—"))
-    st.markdown("</div>", unsafe_allow_html=True)
+# Theme toggle for this page only
+col1, col2 = st.columns([3, 1])
+with col2:
+    light_mode = st.toggle("☀️ Light Mode", value=st.session_state.proposal_light_mode)
+    if light_mode != st.session_state.proposal_light_mode:
+        st.session_state.proposal_light_mode = light_mode
+        st.rerun()
 
-    st.markdown('<div class="data-card"><h4>Business Risks</h4>', unsafe_allow_html=True)
-    for r in ai.get("business_risks",[]):
-        st.markdown(f'<div class="profile-row"><span style="color:#f87171;margin-right:0.5rem">▸</span><span class="profile-value">{r}</span></div>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+# Apply light mode CSS if enabled
+if st.session_state.proposal_light_mode:
+    st.markdown("""
+    <style>
+        /* Light mode override */
+        .stApp {
+            background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
+        }
+        h1, h2, h3, h4, h5, h6 {
+            color: #1e293b !important;
+        }
+        p, li, .stMarkdown {
+            color: #334155 !important;
+        }
+        [data-testid="stMetricValue"] {
+            color: #f59e0b !important;
+        }
+        [data-testid="stMetricLabel"] {
+            color: #64748b !important;
+        }
+        .stButton > button {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: white;
+        }
+        .stTextInput > div > div > input {
+            background: white;
+            border: 1px solid #e2e8f0;
+            color: #1e293b;
+        }
+        .dataframe th {
+            background: #f1f5f9;
+            color: #1e293b;
+        }
+        .dataframe td {
+            background: white;
+            color: #334155;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
-    st.markdown('<div class="data-card"><h4>Technology Risks</h4>', unsafe_allow_html=True)
-    for r in ai.get("technology_risks",[]):
-        st.markdown(f'<div class="profile-row"><span style="color:#fb923c;margin-right:0.5rem">▸</span><span class="profile-value">{r}</span></div>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+# Get company from session state
+company_id = st.session_state.get("last_company_id")
 
-with c2:
-    st.markdown('<div class="data-card"><h4>Email Security Risks</h4>', unsafe_allow_html=True)
-    for r in ai.get("email_risks",[]):
-        st.markdown(f'<div class="profile-row"><span style="color:#fbbf24;margin-right:0.5rem">▸</span><span class="profile-value">{r}</span></div>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+if company_id:
+    company = get_company(company_id)
+    
+    if company:
+        st.markdown(f"## AI Analysis for {company.name}")
+        
+        # Company overview
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Lead Score", f"{company.lead_score}/100")
+        with col2:
+            st.metric("Status", company.lead_status or "New")
+        with col3:
+            st.metric("Domain", company.domain)
+        
+        st.markdown("---")
+        
+        # AI Insights
+        st.markdown("### 🤖 AI-Powered Insights")
+        
+        # Generate insights based on lead score
+        if company.lead_score >= 70:
+            st.success("### 🎯 High-Quality Lead")
+            st.markdown("""
+            **Key Insights:**
+            - This company shows strong potential for immediate engagement
+            - Digital infrastructure appears well-established
+            - Ready for enterprise-level solutions
+            - Recommended action: Schedule a discovery call within 48 hours
+            """)
+        elif company.lead_score >= 50:
+            st.warning("### 📌 Medium-Quality Lead")
+            st.markdown("""
+            **Key Insights:**
+            - Moderate potential - needs further nurturing
+            - Some gaps in digital presence identified
+            - Opportunity for targeted solutions
+            - Recommended action: Send educational content and schedule follow-up
+            """)
+        else:
+            st.info("### 📋 Low-Quality Lead")
+            st.markdown("""
+            **Key Insights:**
+            - Limited digital presence
+            - More research needed to identify needs
+            - May require basic IT infrastructure first
+            - Recommended action: Gather more information before direct outreach
+            """)
+        
+        st.markdown("---")
+        
+        # Opportunity Analysis
+        st.markdown("### 💼 Opportunity Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Detected Needs")
+            needs = []
+            if not company.email:
+                needs.append("• Professional email setup required")
+            if not company.phone:
+                needs.append("• Business phone system needed")
+            if company.lead_score and company.lead_score < 60:
+                needs.append("• Digital presence improvement")
+            needs.append("• IT security assessment")
+            
+            for need in needs:
+                st.markdown(need)
+        
+        with col2:
+            st.markdown("#### Recommended Solutions")
+            solutions = [
+                "• Managed IT Services",
+                "• Cloud Migration",
+                "• Cybersecurity Assessment",
+                "• Website Optimization"
+            ]
+            for solution in solutions:
+                st.markdown(solution)
+        
+        st.markdown("---")
+        
+        # Recommendations
+        st.markdown("### 📊 Strategic Recommendations")
+        
+        rec_col1, rec_col2 = st.columns(2)
+        
+        with rec_col1:
+            st.markdown("#### Immediate Actions")
+            st.markdown("""
+            1. **Connect on LinkedIn** - Research key decision makers
+            2. **Send personalized email** - Reference their specific business
+            3. **Schedule demo** - Show relevant solutions
+            4. **Prepare case study** - Similar industry success
+            """)
+        
+        with rec_col2:
+            st.markdown("#### Long-term Strategy")
+            st.markdown("""
+            1. **Account-based marketing** - Targeted campaigns
+            2. **Quarterly business reviews** - Build relationship
+            3. **Referral program** - Leverage satisfied clients
+            4. **Thought leadership** - Share industry insights
+            """)
+        
+        st.markdown("---")
+        
+        # Competitor Analysis
+        st.markdown("### 🏢 Competitor Context")
+        
+        if company.domain:
+            competitors = [
+                f"Other companies in same domain space",
+                "Similar-sized businesses in the region",
+                "Industry-specific solution providers"
+            ]
+            for comp in competitors:
+                st.markdown(f"• {comp}")
+        
+        st.markdown("---")
+        
+        # Action buttons
+        st.markdown("### 🚀 Take Action")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📄 Generate Proposal", use_container_width=True):
+                st.switch_page("pages/Proposal_Generator.py")
+        
+        with col2:
+            if st.button("📝 Log Activity", use_container_width=True):
+                st.session_state.show_activity_log = True
+        
+        with col3:
+            if st.button("🔄 Refresh Analysis", use_container_width=True):
+                st.rerun()
+        
+        # Activity log modal
+        if st.session_state.get('show_activity_log'):
+            st.markdown("#### Log Activity")
+            activity_type = st.selectbox("Activity Type", ["Call", "Email", "Meeting", "Note", "Follow-up"])
+            activity_desc = st.text_area("Description")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Save Activity", use_container_width=True):
+                    if activity_desc:
+                        log_activity(company.id, activity_type, activity_desc)
+                        st.success("Activity logged!")
+                        st.session_state.show_activity_log = False
+                        st.rerun()
+                    else:
+                        st.warning("Please enter a description")
+            with col2:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.show_activity_log = False
+                    st.rerun()
+        
+        # Recent activity
+        st.markdown("---")
+        st.markdown("### 📝 Recent Activity")
+        st.caption("Activity logging coming soon - Your interactions will appear here")
+        
+    else:
+        st.error("Company not found in database")
+else:
+    st.info("💡 No company selected. Please research a company first from the Company Research page.")
+    
+    # Show recent companies
+    st.markdown("### Recent Companies")
+    try:
+        companies = get_all_companies()
+        if companies:
+            recent_companies = companies[:5]
+            for comp in recent_companies:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"**{comp.name}** - Score: {comp.lead_score}/100")
+                with col2:
+                    if st.button(f"Select", key=comp.id):
+                        st.session_state.last_company_id = comp.id
+                        st.rerun()
+        else:
+            st.caption("No companies researched yet")
+    except:
+        pass
+    
+    if st.button("🔍 Go to Company Research", use_container_width=True):
+        try:
+            st.switch_page("pages/company_research.py")
+        except:
+            st.info("Please navigate to Company Research from the sidebar")
 
-    st.markdown('<div class="data-card"><h4>Recommended Services</h4>', unsafe_allow_html=True)
-    for s in ai.get("recommended_services",[]):
-        st.markdown(f'<div class="profile-row"><span style="color:#4ade80;margin-right:0.5rem">✓</span><span class="profile-value" style="font-weight:600">{s}</span></div>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="data-card"><h4>Revenue Opportunity</h4>', unsafe_allow_html=True)
-    st.info(ai.get("sales_opportunity","—"))
-    st.markdown("</div>", unsafe_allow_html=True)
-
+# Footer
 st.markdown("---")
-if st.button("📄 Generate Proposal from This Analysis", type="primary"):
-    st.session_state["ai_for_proposal"] = ai
-    st.switch_page("pages/Proposal_Generator.py")
+st.caption(f"Lead Intelligence • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
