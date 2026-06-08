@@ -15,7 +15,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Then import other modules
+# Now import other modules
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,47 +24,50 @@ try:
     from modules.theme import THEME_CSS
     st.markdown(THEME_CSS, unsafe_allow_html=True)
 except Exception:
-    pass  # Theme is optional
+    pass
 
-# Import other modules with error handling
+# Import with error handling
 try:
     from modules.company_research import research_company
     from modules.lead_scoring import score_from_research
     from modules.database import get_session, ResearchHistory
     from datetime import datetime
+    import pandas as pd
     IMPORT_SUCCESS = True
 except ImportError as e:
     IMPORT_SUCCESS = False
     st.error(f"⚠️ Import Error: {e}")
-    st.info("Make sure all module files exist in the 'modules' folder")
-    # Don't stop, allow basic functionality
+    st.info("Please make sure all module files exist in the 'modules' folder")
+    st.stop()
 
-# Page title
 st.markdown("# 📊 Bulk Company Research")
 st.caption("Research multiple companies at once and export results")
 st.markdown("---")
 
-# Input section
-company_list = st.text_area(
-    "📝 Enter Company Names (one per line)",
-    placeholder="Nyaho Medical Centre\nNakomachi Financial Services\nKasapreko Company Limited\nMTN Ghana\nGCB Bank",
-    height=200,
-    help="Enter one company name per line. Maximum 20 companies at once."
-)
-
-col1, col2, col3 = st.columns([1, 1, 2])
-with col1:
-    country = st.selectbox("Country", ["Ghana", "Nigeria", "Kenya", "South Africa", "Other"])
-with col2:
-    max_companies = st.number_input("Max Companies", min_value=1, max_value=20, value=10)
-with col3:
-    run_bulk = st.button("🚀 Start Bulk Research", type="primary", use_container_width=True)
-
-# Store results in session state
+# Initialize session state
 if 'bulk_results' not in st.session_state:
     st.session_state.bulk_results = []
 if 'research_complete' not in st.session_state:
     st.session_state.research_complete = False
+
+# Input section
+company_list = st.text_area(
+    "📝 Enter Company Names (one per line)",
+    placeholder="Nyaho Medical Centre\nMTN Ghana\nGCB Bank\nKasapreko Company Limited",
+    height=150,
+    help="Enter one company name per line"
+)
+
+col1, col2, col3 = st.columns([1, 1, 2])
+with col1:
+    max_companies = st.number_input("Max Companies", min_value=1, max_value=20, value=10)
+with col2:
+    run_bulk = st.button("🚀 Start Bulk Research", type="primary", use_container_width=True)
+with col3:
+    if st.button("🔄 Clear Results", use_container_width=True):
+        st.session_state.bulk_results = []
+        st.session_state.research_complete = False
+        st.rerun()
 
 # Function to save to database
 def save_to_database(company_name, website, lead_score, status):
@@ -81,20 +84,18 @@ def save_to_database(company_name, website, lead_score, status):
         db.close()
         return True
     except Exception as e:
-        st.warning(f"Could not save to database: {e}")
         return False
 
 # Run bulk research
 if run_bulk and company_list:
     companies = [c.strip() for c in company_list.split("\n") if c.strip()]
     
-    # Limit number of companies
     if len(companies) > max_companies:
-        st.warning(f"Limiting to first {max_companies} companies")
+        st.warning(f"⚠️ Limiting to first {max_companies} companies")
         companies = companies[:max_companies]
     
     if not companies:
-        st.error("Please enter at least one company name")
+        st.error("❌ Please enter at least one company name")
         st.stop()
     
     # Progress tracking
@@ -112,15 +113,9 @@ if run_bulk and company_list:
             result = research_company(company_name=company, website="")
             
             # Score the lead
-            if IMPORT_SUCCESS:
-                lead = score_from_research(result)
-                lead_score = lead.total
-                lead_status = lead.status
-                opportunity = lead.opportunity_summary[:100] if hasattr(lead, 'opportunity_summary') else ""
-            else:
-                lead_score = 0
-                lead_status = "Unknown"
-                opportunity = "Scoring module not available"
+            lead = score_from_research(result)
+            lead_score = lead.total
+            lead_status = lead.status
             
             # Save to database
             save_to_database(result.company_name, result.website, lead_score, lead_status)
@@ -139,7 +134,6 @@ if run_bulk and company_list:
             })
             
         except Exception as e:
-            st.error(f"Error researching {company}: {str(e)[:100]}")
             results.append({
                 "Company": company,
                 "Website": "Error",
@@ -158,77 +152,59 @@ if run_bulk and company_list:
         # Show live results
         with results_container:
             st.markdown(f"### Results ({i+1}/{len(companies)})")
-            
-            # Create DataFrame for display
-            import pandas as pd
             df = pd.DataFrame(results)
             st.dataframe(df, use_container_width=True)
     
+    progress_bar.progress(1.0)
     status_text.text("✅ Research Complete!")
     st.session_state.bulk_results = results
     st.session_state.research_complete = True
     
-    # Success message
     st.balloons()
     st.success(f"✅ Successfully researched {len(results)} companies!")
+
+# Display results if they exist
+if st.session_state.research_complete and st.session_state.bulk_results:
+    results = st.session_state.bulk_results
     
-    # Export options
     st.markdown("---")
     st.markdown("## 📥 Export Results")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # Export to CSV
         if st.button("📊 Export to CSV", use_container_width=True):
-            import pandas as pd
             df = pd.DataFrame(results)
             csv = df.to_csv(index=False)
             st.download_button(
-                label="Download CSV File",
+                label="Download CSV",
                 data=csv,
                 file_name=f"bulk_research_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
     
     with col2:
-        # Export to JSON
-        if st.button("📋 Export to JSON", use_container_width=True):
-            import json
-            json_str = json.dumps(results, indent=2, default=str)
-            st.download_button(
-                label="Download JSON File",
-                data=json_str,
-                file_name=f"bulk_research_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json"
-            )
+        if st.button("📋 Copy to Clipboard", use_container_width=True):
+            df = pd.DataFrame(results)
+            st.info("Select all data in the table above and copy (Ctrl+C)")
     
     with col3:
-        # Clear results
-        if st.button("🔄 Clear Results", use_container_width=True):
+        if st.button("🔄 New Research", use_container_width=True):
             st.session_state.bulk_results = []
             st.session_state.research_complete = False
             st.rerun()
-
-elif run_bulk and not company_list:
-    st.warning("⚠️ Please enter at least one company name to research")
-
-# Display previous results if they exist
-if st.session_state.research_complete and st.session_state.bulk_results:
+    
     st.markdown("---")
     st.markdown("## 📈 Summary Statistics")
-    
-    results = st.session_state.bulk_results
     
     # Calculate statistics
     total = len(results)
     successful = sum(1 for r in results if r.get("Website") != "Error")
     
-    # Extract scores safely
     scores = []
     for r in results:
+        score_str = r.get("Lead Score", "0/100")
         try:
-            score_str = r.get("Lead Score", "0/100")
             score = int(score_str.split('/')[0]) if '/' in score_str else 0
             scores.append(score)
         except:
@@ -237,7 +213,7 @@ if st.session_state.research_complete and st.session_state.bulk_results:
     avg_score = sum(scores) / len(scores) if scores else 0
     hot_leads = sum(1 for s in scores if s >= 70)
     warm_leads = sum(1 for s in scores if 50 <= s < 70)
-    cold_leads = sum(1 for s in scores if s < 50)
+    cold_leads = sum(1 for s in scores if s < 50 and s > 0)
     
     col1, col2, col3, col4, col5 = st.columns(5)
     
@@ -248,20 +224,18 @@ if st.session_state.research_complete and st.session_state.bulk_results:
     with col3:
         st.metric("Avg Lead Score", f"{avg_score:.0f}/100")
     with col4:
-        st.metric("Hot Leads (70+)", hot_leads)
+        st.metric("🔥 Hot Leads (70+)", hot_leads)
     with col5:
-        st.metric("Warm Leads (50-69)", warm_leads)
+        st.metric("📊 Warm Leads (50-69)", warm_leads)
     
     # Show top leads
-    st.markdown("### 🔥 Top 5 Hot Leads")
-    
-    # Sort by lead score
-    sorted_results = sorted(results, key=lambda x: int(x.get("Lead Score", "0/100").split('/')[0]) if x.get("Lead Score") != "Error" else 0, reverse=True)
-    top_leads = [r for r in sorted_results if r.get("Lead Score") != "Error"][:5]
-    
-    if top_leads:
-        for i, lead in enumerate(top_leads, 1):
-            with st.expander(f"{i}. {lead['Company']} - Score: {lead['Lead Score']} ({lead['Status']})"):
+    if hot_leads > 0:
+        st.markdown("---")
+        st.markdown("### 🔥 Hot Leads")
+        
+        hot_companies = [r for r in results if r.get("Lead Score") != "Error" and int(r.get("Lead Score", "0/100").split('/')[0]) >= 70]
+        for lead in hot_companies[:5]:
+            with st.expander(f"📌 {lead['Company']} - Score: {lead['Lead Score']}"):
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write(f"**Website:** {lead['Website']}")
@@ -269,8 +243,6 @@ if st.session_state.research_complete and st.session_state.bulk_results:
                 with col2:
                     st.write(f"**Phone:** {lead['Phone']}")
                     st.write(f"**Confidence:** {lead['Confidence']}")
-    else:
-        st.info("No hot leads found in this batch")
 
 # Empty state
 elif not run_bulk and not st.session_state.bulk_results:
@@ -279,34 +251,37 @@ elif not run_bulk and not st.session_state.bulk_results:
     with st.expander("📖 How to use Bulk Research"):
         st.markdown("""
         **Instructions:**
-        1. Enter one company name per line in the text area
-        2. Select the country (helps with search accuracy)
-        3. Set maximum number of companies to research (1-20)
-        4. Click 'Start Bulk Research'
-        5. Wait for the research to complete
-        6. Export results to CSV or JSON
+        1. Enter one company name per line
+        2. Set maximum number of companies (1-20)
+        3. Click 'Start Bulk Research'
+        4. Results will appear as they complete
+        5. Export to CSV when done
         
         **Tips:**
         - Use exact company names for best results
-        - Maximum 20 companies per batch to avoid timeouts
-        - Results are automatically saved to the CRM
-        - Hot leads (score 70+) are highlighted
+        - Maximum 20 companies per batch
+        - Results are saved to the database automatically
         """)
     
     # Example companies
-    st.markdown("### 📝 Example Companies to Try")
-    if st.button("Load Example Companies"):
-        example = """MTN Ghana
-GCB Bank
-Nyaho Medical Centre
-Kasapreko Company Limited
-Nakomachi Financial Services"""
-        st.session_state.example_loaded = True
-        st.rerun()
+    st.markdown("### 📝 Example Companies")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🏥 Medical Companies", use_container_width=True):
+            example = "Nyaho Medical Centre\nKorle Bu Teaching Hospital\nUniversity of Ghana Medical Centre"
+            st.session_state.example_loaded = example
+            st.rerun()
+    
+    with col2:
+        if st.button("🏦 Financial Companies", use_container_width=True):
+            example = "GCB Bank\nMTN Ghana\nKasapreko Company Limited"
+            st.session_state.example_loaded = example
+            st.rerun()
     
     if st.session_state.get('example_loaded'):
-        st.text_area("Companies loaded!", value=example, height=150, disabled=True)
+        st.text_area("Companies loaded!", value=st.session_state.example_loaded, height=100)
 
 # Footer
 st.markdown("---")
-st.caption("TechWokx Lead Intelligence - Bulk Research Module")
+st.caption(f"TechWokx Bulk Research • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
