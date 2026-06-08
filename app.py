@@ -1,4 +1,4 @@
-# app.py - TechWokx Lead Intelligence System (Simplified)
+# app.py - TechWokx Lead Intelligence System
 import streamlit as st
 import pandas as pd
 import requests
@@ -35,7 +35,6 @@ except:
 # ============ API FUNCTIONS ============
 
 def search_company_serp(company_name):
-    """Search company using SERP API"""
     if not SERP_API_KEY:
         return None
     try:
@@ -62,7 +61,6 @@ def search_company_serp(company_name):
         return None
 
 def get_company_location(company_name):
-    """Get company location using Google Maps API"""
     if not GOOGLE_MAPS_API_KEY:
         return None
     try:
@@ -82,7 +80,6 @@ def get_company_location(company_name):
         return None
 
 def extract_email_from_website(website):
-    """Extract email from website"""
     if not website:
         return {"emails": [], "primary_email": None}
     try:
@@ -103,7 +100,6 @@ def extract_email_from_website(website):
         return {"emails": [], "primary_email": None}
 
 def analyze_with_ai(company_data):
-    """AI analysis using OpenAI"""
     if not OPENAI_API_KEY:
         return None
     try:
@@ -119,7 +115,6 @@ def analyze_with_ai(company_data):
         return None
 
 def deep_research_company(company_name, website=None):
-    """Perform deep research on a company"""
     cache_key = hashlib.md5(f"{company_name}_{website}".encode()).hexdigest()
     if cache_key in st.session_state.research_cache:
         return st.session_state.research_cache[cache_key]
@@ -200,7 +195,6 @@ def deep_research_company(company_name, website=None):
     return result
 
 def add_lead(name, email, phone, score):
-    """Add lead to CRM"""
     new_id = len(st.session_state.leads) + 1
     status = "Hot" if score >= 80 else "Warm" if score >= 60 else "Cold"
     st.session_state.leads.append({
@@ -209,7 +203,7 @@ def add_lead(name, email, phone, score):
     })
 
 # ============ CSS STYLES ============
-st.markdown("""
+css_style = """
 <style>
 .stApp { background-color: #f8fafc; }
 [data-testid="stSidebar"] { background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%); }
@@ -229,7 +223,8 @@ st.markdown("""
 .plan-badge { background: linear-gradient(135deg, #fbbf24, #f59e0b); border-radius: 12px; padding: 0.75rem; text-align: center; margin-top: 1rem; }
 .stButton > button { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #0f172a !important; font-weight: 600; border: none; border-radius: 8px; }
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(css_style, unsafe_allow_html=True)
 
 # ============ SIDEBAR NAVIGATION ============
 with st.sidebar:
@@ -265,21 +260,11 @@ with st.sidebar:
     st.markdown(f"Maps: {'✅' if GOOGLE_MAPS_API_KEY else '❌'}")
     st.markdown(f"AI: {'✅' if OPENAI_API_KEY else '❌'}")
     st.markdown("---")
-    st.markdown("""
-    <div class="plan-badge">
-        🚀 Pro Plan<br>
-        <small>Audit & Research</small>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown('<div class="plan-badge">🚀 Pro Plan<br><small>Audit & Research</small></div>', unsafe_allow_html=True)
 
 # ============ DASHBOARD PAGE ============
 if st.session_state.page == 'dashboard':
-    st.markdown("""
-    <div class="welcome-card">
-        <h2>Welcome to TechWokx Lead Intelligence</h2>
-        <p>Research companies, run audits, and manage leads.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown('<div class="welcome-card"><h2>Welcome to TechWokx Lead Intelligence</h2><p>Research companies, run audits, and manage leads.</p></div>', unsafe_allow_html=True)
     
     total_leads = len(st.session_state.leads)
     hot_leads = sum(1 for l in st.session_state.leads if l.get("score", 0) >= 80)
@@ -301,12 +286,7 @@ if st.session_state.page == 'dashboard':
         st.markdown('<div class="section-header">📊 Recent Research</div>', unsafe_allow_html=True)
         if st.session_state.leads:
             for lead in st.session_state.leads[-5:]:
-                st.markdown(f"""
-                <div class="activity-item">
-                    <div class="activity-action">{lead['name']} - Score: {lead['score']}/100</div>
-                    <div class="activity-time">{lead['audit_date'].strftime('%Y-%m-%d')}</div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f'<div class="activity-item"><div class="activity-action">{lead["name"]} - Score: {lead["score"]}/100</div><div class="activity-time">{lead["audit_date"].strftime("%Y-%m-%d")}</div></div>', unsafe_allow_html=True)
         else:
             st.info("No leads yet. Use Company Research to get started.")
     
@@ -341,49 +321,22 @@ elif st.session_state.page == 'company_research':
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.markdown(f"""
-                    <div class="data-card">
-                        <h4>Company Information</h4>
-                        <p><strong>Name:</strong> {result['name']}</p>
-                        <p><strong>Website:</strong> {result['website'] or 'Not found'}</p>
-                        <p><strong>Address:</strong> {result['address'] or 'Not found'}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.markdown(f"""
-                    <div class="data-card">
-                        <h4>Contact Information</h4>
-                        <p><strong>Email:</strong> {result.get('primary_email', 'Not found')}</p>
-                        <p><strong>Other Emails:</strong> {', '.join(result.get('emails', [])[:2]) or 'None'}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(f'<div class="data-card"><h4>Company Information</h4><p><strong>Name:</strong> {result["name"]}</p><p><strong>Website:</strong> {result["website"] or "Not found"}</p><p><strong>Address:</strong> {result["address"] or "Not found"}</p></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="data-card"><h4>Contact Information</h4><p><strong>Email:</strong> {result.get("primary_email", "Not found")}</p><p><strong>Other Emails:</strong> {", ".join(result.get("emails", [])[:2]) or "None"}</p></div>', unsafe_allow_html=True)
                 
                 with col2:
-                    st.markdown(f"""
-                    <div class="data-card" style="text-align: center;">
-                        <h4>Lead Score</h4>
-                        <p style="font-size: 3rem; font-weight: 700; color: #fbbf24;">{result['lead_score']}/100</p>
-                        <p><strong>Sources:</strong> {', '.join(result['sources']) or 'Direct'}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    if result['description']:
-                        st.markdown(f"""
-                        <div class="data-card">
-                            <h4>Description</h4>
-                            <p>{result['description'][:300]}...</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    st.markdown(f'<div class="data-card" style="text-align: center;"><h4>Lead Score</h4><p style="font-size: 3rem; font-weight: 700; color: #fbbf24;">{result["lead_score"]}/100</p><p><strong>Sources:</strong> {", ".join(result["sources"]) or "Direct"}</p></div>', unsafe_allow_html=True)
+                    if result["description"]:
+                        st.markdown(f'<div class="data-card"><h4>Description</h4><p>{result["description"][:300]}...</p></div>', unsafe_allow_html=True)
                 
-                st.markdown(f"""
-                <div class="data-card">
-                    <h4>Recommendations</h4>
-                    <ul>{''.join([f'<li>{r}</li>' for r in result['recommendations']])}</ul>
-                </div>
-                """, unsafe_allow_html=True)
+                rec_html = '<div class="data-card"><h4>Recommendations</h4><ul>'
+                for r in result["recommendations"]:
+                    rec_html += f'<li>{r}</li>'
+                rec_html += '</ul></div>'
+                st.markdown(rec_html, unsafe_allow_html=True)
                 
                 if st.button("➕ Add to CRM"):
-                    add_lead(result['name'], result.get('primary_email', ''), '', result['lead_score'])
+                    add_lead(result["name"], result.get("primary_email", ""), "", result["lead_score"])
                     st.success(f"Added {result['name']} to CRM!")
         else:
             st.warning("Please enter a company name")
@@ -394,8 +347,7 @@ elif st.session_state.page == 'bulk_research':
     st.caption("Research multiple companies at once")
     st.markdown("---")
     
-    companies = st.text_area("Company Names (one per line)", height=150, 
-                            placeholder="Nyaho Medical Centre\nMTN Ghana\nGCB Bank\nKasapreko")
+    companies = st.text_area("Company Names (one per line)", height=150, placeholder="Nyaho Medical Centre\nMTN Ghana\nGCB Bank\nKasapreko")
     
     if st.button("Start Bulk Research", type="primary"):
         if companies:
@@ -405,7 +357,7 @@ elif st.session_state.page == 'bulk_research':
             for i, c in enumerate(lines):
                 progress.progress((i + 1) / len(lines))
                 result = deep_research_company(c)
-                add_lead(result['name'], result.get('primary_email', ''), '', result['lead_score'])
+                add_lead(result["name"], result.get("primary_email", ""), "", result["lead_score"])
                 results.append({"Company": c, "Score": f"{result['lead_score']}/100", "Status": "Added"})
             st.success(f"Added {len(lines)} companies to CRM!")
             st.dataframe(results, use_container_width=True)
@@ -421,35 +373,33 @@ elif st.session_state.page == 'dns_audit':
     if st.button("Run DNS Audit", type="primary"):
         if domain:
             with st.spinner(f"Auditing {domain}..."):
-                import dns.resolver
-                results = []
                 try:
-                    a_records = dns.resolver.resolve(domain, 'A')
-                    results.append(("A Records", "✅ Found", f"{len(a_records)} records"))
-                except:
-                    results.append(("A Records", "❌ Failed", "No A records found"))
-                
-                try:
-                    mx_records = dns.resolver.resolve(domain, 'MX')
-                    results.append(("MX Records", "✅ Found", f"{len(mx_records)} mail servers"))
-                except:
-                    results.append(("MX Records", "❌ Failed", "No mail servers configured"))
-                
-                try:
-                    txt_records = dns.resolver.resolve(domain, 'TXT')
-                    has_spf = any('v=spf1' in str(r) for r in txt_records)
-                    results.append(("SPF Record", "✅ Found" if has_spf else "⚠️ Missing", "Email authentication" if has_spf else "Spoofing risk"))
-                except:
-                    results.append(("SPF Record", "❌ Failed", "Not configured"))
-                
-                st.markdown("### DNS Audit Results")
-                for name, status, detail in results:
-                    st.markdown(f"""
-                    <div class="data-card">
-                        <p><strong>{name}:</strong> {status}</p>
-                        <p style="color:#64748b; font-size:0.8rem;">{detail}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    import dns.resolver
+                    results = []
+                    try:
+                        a_records = dns.resolver.resolve(domain, 'A')
+                        results.append(("A Records", "✅ Found", f"{len(a_records)} records"))
+                    except:
+                        results.append(("A Records", "❌ Failed", "No A records found"))
+                    
+                    try:
+                        mx_records = dns.resolver.resolve(domain, 'MX')
+                        results.append(("MX Records", "✅ Found", f"{len(mx_records)} mail servers"))
+                    except:
+                        results.append(("MX Records", "❌ Failed", "No mail servers configured"))
+                    
+                    try:
+                        txt_records = dns.resolver.resolve(domain, 'TXT')
+                        has_spf = any('v=spf1' in str(r) for r in txt_records)
+                        results.append(("SPF Record", "✅ Found" if has_spf else "⚠️ Missing", "Email authentication" if has_spf else "Spoofing risk"))
+                    except:
+                        results.append(("SPF Record", "❌ Failed", "Not configured"))
+                    
+                    st.markdown("### DNS Audit Results")
+                    for name, status, detail in results:
+                        st.markdown(f'<div class="data-card"><p><strong>{name}:</strong> {status}</p><p style="color:#64748b; font-size:0.8rem;">{detail}</p></div>', unsafe_allow_html=True)
+                except ImportError:
+                    st.error("Please install dnspython: pip install dnspython")
         else:
             st.warning("Please enter a domain")
 
@@ -490,12 +440,7 @@ elif st.session_state.page == 'website_audit':
                 results.append(("Performance", "✅ OK", "Response time under 3 seconds"))
                 
                 for name, status, detail in results:
-                    st.markdown(f"""
-                    <div class="data-card">
-                        <p><strong>{name}:</strong> {status}</p>
-                        <p style="color:#64748b; font-size:0.8rem;">{detail}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(f'<div class="data-card"><p><strong>{name}:</strong> {status}</p><p style="color:#64748b; font-size:0.8rem;">{detail}</p></div>', unsafe_allow_html=True)
         else:
             st.warning("Please enter a URL")
 
@@ -510,54 +455,32 @@ elif st.session_state.page == 'email_security':
     if st.button("Run Email Security Audit", type="primary"):
         if domain:
             with st.spinner(f"Checking {domain}..."):
-                results = []
                 try:
                     import dns.resolver
-                    txt_records = dns.resolver.resolve(domain, 'TXT')
-                    spf_found = any('v=spf1' in str(r).lower() for r in txt_records)
-                    results.append(("SPF Record", "✅ Configured" if spf_found else "❌ Missing", "Prevents email spoofing" if spf_found else "Emails may be spoofed"))
-                except:
-                    results.append(("SPF Record", "❌ Failed", "Not configured"))
-                
-                try:
-                    dmarc = dns.resolver.resolve(f"_dmarc.{domain}", 'TXT')
-                    results.append(("DMARC Record", "✅ Configured", "Email security policy active"))
-                except:
-                    results.append(("DMARC Record", "⚠️ Missing", "No DMARC policy - spoofing risk"))
-                
-                try:
-                    dkim_selectors = ['default', 'google', 'selector1', 'dkim']
-                    dkim_found = False
-                    for sel in dkim_selectors:
-                        try:
-                            dns.resolver.resolve(f"{sel}._domainkey.{domain}", 'TXT')
-                            dkim_found = True
-                            break
-                        except:
-                            continue
-                    results.append(("DKIM Record", "✅ Configured" if dkim_found else "⚠️ Missing", "Email signing" if dkim_found else "Emails may be rejected"))
-                except:
-                    results.append(("DKIM Record", "⚠️ Unknown", "Could not verify"))
-                
-                risk_score = sum(1 for r in results if '✅' in r[1]) * 33
-                risk_level = "Low" if risk_score >= 66 else "Medium" if risk_score >= 33 else "High"
-                
-                st.markdown("### Email Security Audit Results")
-                for name, status, detail in results:
-                    st.markdown(f"""
-                    <div class="data-card">
-                        <p><strong>{name}:</strong> {status}</p>
-                        <p style="color:#64748b; font-size:0.8rem;">{detail}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                st.markdown(f"""
-                <div class="data-card">
-                    <h4>Overall Risk Assessment</h4>
-                    <p><strong>Risk Level:</strong> {risk_level}</p>
-                    <p><strong>Security Score:</strong> {risk_score}/100</p>
-                </div>
-                """, unsafe_allow_html=True)
+                    results = []
+                    try:
+                        txt_records = dns.resolver.resolve(domain, 'TXT')
+                        spf_found = any('v=spf1' in str(r).lower() for r in txt_records)
+                        results.append(("SPF Record", "✅ Configured" if spf_found else "❌ Missing", "Prevents email spoofing" if spf_found else "Emails may be spoofed"))
+                    except:
+                        results.append(("SPF Record", "❌ Failed", "Not configured"))
+                    
+                    try:
+                        dmarc = dns.resolver.resolve(f"_dmarc.{domain}", 'TXT')
+                        results.append(("DMARC Record", "✅ Configured", "Email security policy active"))
+                    except:
+                        results.append(("DMARC Record", "⚠️ Missing", "No DMARC policy - spoofing risk"))
+                    
+                    risk_score = sum(1 for r in results if '✅' in r[1]) * 50
+                    risk_level = "Low" if risk_score >= 66 else "Medium" if risk_score >= 33 else "High"
+                    
+                    st.markdown("### Email Security Audit Results")
+                    for name, status, detail in results:
+                        st.markdown(f'<div class="data-card"><p><strong>{name}:</strong> {status}</p><p style="color:#64748b; font-size:0.8rem;">{detail}</p></div>', unsafe_allow_html=True)
+                    
+                    st.markdown(f'<div class="data-card"><h4>Overall Risk Assessment</h4><p><strong>Risk Level:</strong> {risk_level}</p><p><strong>Security Score:</strong> {risk_score}/100</p></div>', unsafe_allow_html=True)
+                except ImportError:
+                    st.error("Please install dnspython: pip install dnspython")
         else:
             st.warning("Please enter a domain")
 
@@ -572,31 +495,9 @@ elif st.session_state.page == 'it_audit':
     if st.button("Start IT Audit", type="primary"):
         if company_name:
             with st.spinner("Running IT audit..."):
-                st.markdown(f"""
-                <div class="data-card">
-                    <h4>IT Audit for {company_name}</h4>
-                    <p>✅ Network Security: Good</p>
-                    <p>⚠️ Email Security: Needs improvement</p>
-                    <p>✅ Access Control: Properly configured</p>
-                    <p>⚠️ Backup System: Review recommended</p>
-                    <p>✅ Device Management: Active monitoring</p>
-                </div>
-                
-                <div class="data-card">
-                    <h4>Recommendations</h4>
-                    <ul>
-                        <li>Implement DMARC policy for email security</li>
-                        <li>Review backup and disaster recovery plan</li>
-                        <li>Conduct employee security awareness training</li>
-                        <li>Schedule quarterly security assessments</li>
-                    </ul>
-                </div>
-                
-                <div class="data-card">
-                    <h4>Risk Score: 72/100 - Moderate Risk</h4>
-                    <p>Priority: Medium - Address within 30 days</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f'<div class="data-card"><h4>IT Audit for {company_name}</h4><p>✅ Network Security: Good</p><p>⚠️ Email Security: Needs improvement</p><p>✅ Access Control: Properly configured</p><p>⚠️ Backup System: Review recommended</p><p>✅ Device Management: Active monitoring</p></div>', unsafe_allow_html=True)
+                st.markdown('<div class="data-card"><h4>Recommendations</h4><ul><li>Implement DMARC policy for email security</li><li>Review backup and disaster recovery plan</li><li>Conduct employee security awareness training</li><li>Schedule quarterly security assessments</li></ul></div>', unsafe_allow_html=True)
+                st.markdown('<div class="data-card"><h4>Risk Score: 72/100 - Moderate Risk</h4><p>Priority: Medium - Address within 30 days</p></div>', unsafe_allow_html=True)
         else:
             st.warning("Please enter company name")
 
@@ -610,11 +511,11 @@ elif st.session_state.page == 'crm':
         crm_data = []
         for lead in st.session_state.leads:
             crm_data.append({
-                "Company": lead['name'],
-                "Email": lead.get('email', 'N/A'),
-                "Score": lead.get('score', 0),
-                "Status": lead.get('status', 'New'),
-                "Date": lead['audit_date'].strftime('%Y-%m-%d')
+                "Company": lead["name"],
+                "Email": lead.get("email", "N/A"),
+                "Score": lead.get("score", 0),
+                "Status": lead.get("status", "New"),
+                "Date": lead["audit_date"].strftime("%Y-%m-%d")
             })
         st.dataframe(crm_data, use_container_width=True)
         
@@ -644,24 +545,31 @@ elif st.session_state.page == 'settings':
     st.caption("Configure API keys")
     st.markdown("---")
     
-    st.markdown("""
-    ### API Configuration
+    st.markdown("### API Configuration")
+    st.markdown("Add API keys to enable advanced features:")
+    st.markdown("- SERP API - Get company data from search")
+    st.markdown("- Google Maps API - Location verification")
+    st.markdown("- OpenAI API - AI-powered insights")
+    st.markdown("")
+    st.markdown("### How to add API keys:")
+    st.markdown("1. Create `.streamlit/secrets.toml` file")
+    st.markdown("2. Add your keys:")
+    st.code("""
+SERP_API_KEY = "your_key_here"
+GOOGLE_MAPS_API_KEY = "your_key_here"
+OPENAI_API_KEY = "your_key_here"
+    """)
     
-    Add API keys to enable advanced features:
-    
-    **Required for Company Research:**
-    - SERP API - Get company data from search
-    
-    **Optional:**
-    - Google Maps API - Location verification
-    - OpenAI API - AI-powered insights
-    
-    ### How to add API keys:
-    
-    1. Create `.streamlit/secrets.toml` file
-    2. Add your keys:
-    
-    ```toml
-    SERP_API_KEY = "your_key_here"
-    GOOGLE_MAPS_API_KEY = "your_key_here"
-    OPENAI_API_KEY = "your_key_here"
+    st.markdown("---")
+    st.markdown("### Current Status")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"SERP API: **{'✅ Active' if SERP_API_KEY else '❌ Inactive'}**")
+        st.markdown(f"Google Maps: **{'✅ Active' if GOOGLE_MAPS_API_KEY else '❌ Inactive'}**")
+    with col2:
+        st.markdown(f"OpenAI: **{'✅ Active' if OPENAI_API_KEY else '❌ Inactive'}**")
+        st.markdown(f"Total Leads: **{len(st.session_state.leads)}**")
+
+# ============ FOOTER ============
+st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
+st.caption("© 2024 TechWokx Ghana | Lead Intelligence & Audit System")
