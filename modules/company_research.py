@@ -1,3 +1,4 @@
+# modules/company_research.py
 import requests
 import re
 import tldextract
