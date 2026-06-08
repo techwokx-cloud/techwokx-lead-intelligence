@@ -29,7 +29,7 @@ except Exception:
 from modules.company_research import research_company
 from modules.lead_scoring import score_from_research
 from modules.technology_detector import detect_technologies
-from modules.crm import save_research_to_crm, log_activity
+from modules.crm import save_research_to_crm
 from modules.database import get_session, ResearchHistory
 from datetime import datetime
 
@@ -50,29 +50,38 @@ if run and (company_name or website):
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Track progress manually
-    progress_steps = [
-        "Searching company information...",
-        "Verifying website...",
-        "Crawling website for contacts...",
-        "Running DNS audit...",
-        "Calculating lead score...",
-        "Complete!"
-    ]
+    # Use a class to track progress (avoids nonlocal issues)
+    class ProgressTracker:
+        def __init__(self):
+            self.current_step = 0
+            self.total_steps = 6
+        
+        def update(self, message):
+            status_text.text(message)
+            # Simple increment - just update based on message
+            if "Searching" in message:
+                self.current_step = 1
+            elif "Verifying" in message:
+                self.current_step = 2
+            elif "Crawling" in message:
+                self.current_step = 3
+            elif "DNS" in message:
+                self.current_step = 4
+            elif "Calculating" in message or "Analyzing" in message:
+                self.current_step = 5
+            elif "Saving" in message:
+                self.current_step = 6
+            else:
+                self.current_step = min(self.current_step + 1, self.total_steps)
+            
+            # Update progress bar (0 to 100)
+            progress_value = self.current_step / self.total_steps
+            progress_bar.progress(progress_value)
     
-    current_step = 0
+    tracker = ProgressTracker()
     
     def update_progress(message):
-        nonlocal current_step
-        status_text.text(message)
-        # Find which step we're on
-        for i, step in enumerate(progress_steps):
-            if step in message:
-                current_step = i
-                break
-        # Update progress bar (0 to 100)
-        progress_value = (current_step + 1) / len(progress_steps)
-        progress_bar.progress(progress_value)
+        tracker.update(message)
     
     try:
         with st.spinner("Researching..."):
@@ -171,7 +180,7 @@ if "last_research" in st.session_state:
             st.markdown("</div>", unsafe_allow_html=True)
         with r:
             if result.description:
-                st.markdown(f'<div class="data-card"><h4>About</h4><p style="color:#94a3b8">{result.description[:400]}</p></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="data-card"><h4>About</h4><p style="color:#e2e8f0">{result.description[:400]}</p></div>', unsafe_allow_html=True)
             st.markdown('<div class="data-card"><h4>Website Status</h4>', unsafe_allow_html=True)
             if web:
                 ssl_valid = False
@@ -253,7 +262,7 @@ if "last_research" in st.session_state:
                 st.markdown(f'<div class="profile-row"><span class="profile-label" style="color:#fb923c">+{r.points}</span><span class="profile-value">{r.reason}</span></div>', unsafe_allow_html=True)
             if not triggered: st.caption("No critical issues")
             st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown(f'<div class="data-card"><h4>Opportunity Summary</h4><p style="color:#94a3b8;font-size:0.85rem">{lead.opportunity_summary}</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="data-card"><h4>Opportunity Summary</h4><p style="color:#e2e8f0;font-size:0.85rem">{lead.opportunity_summary}</p></div>', unsafe_allow_html=True)
         with c2:
             st.markdown('<div class="data-card"><h4>Recommended Services</h4>', unsafe_allow_html=True)
             actions = []
