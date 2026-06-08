@@ -2,30 +2,43 @@
 import sys
 import os
 
-# Add parent directory to path
+# Add parent directory to path FIRST
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Import Streamlit FIRST
 import streamlit as st
-from dotenv import load_dotenv
 
+# Set page config (must be first Streamlit command)
+st.set_page_config(
+    page_title="Company Research",
+    page_icon="🔍",
+    layout="wide"
+)
+
+# Now import other modules
+from dotenv import load_dotenv
 load_dotenv()
 
-# Try to import with error handling
+# Try to import theme safely
 try:
     from modules.theme import THEME_CSS
-    st.markdown(THEME_CSS, unsafe_allow_html=True)
-    
+    if THEME_CSS:
+        st.markdown(THEME_CSS, unsafe_allow_html=True)
+except Exception:
+    pass
+
+# Import all required modules
+try:
     from modules.company_research import research_company
     from modules.lead_scoring import score_from_research
     from modules.technology_detector import detect_technologies
     from modules.crm import save_research_to_crm
     from modules.database import get_session, ResearchHistory
     from datetime import datetime
-    
     IMPORT_SUCCESS = True
-except Exception as e:
+except ImportError as e:
     IMPORT_SUCCESS = False
-    st.error(f"❌ Import Error: {str(e)}")
+    st.error(f"❌ Import Error: {e}")
     st.info("""
     Please make sure all required modules exist:
     - modules/company_research.py
@@ -40,157 +53,319 @@ except Exception as e:
     """)
     st.stop()
 
-if IMPORT_SUCCESS:
-    st.set_page_config(
-        page_title="Company Research",
-        page_icon="🔍",
-        layout="wide"
-    )
+st.markdown("# 🔍 Company Research")
+st.caption("The intelligence hub — research any company in seconds.")
+st.markdown("---")
+
+col1, col2, col3 = st.columns([2, 2, 1])
+with col1:
+    company_name = st.text_input("Company Name", placeholder="e.g. Nyaho Medical Centre", label_visibility="collapsed")
+with col2:
+    website = st.text_input("Website", placeholder="e.g. nyahoclinic.com", label_visibility="collapsed")
+with col3:
+    run = st.button("🔍 Research", type="primary", use_container_width=True)
+
+if run and (company_name or website):
+    # Create progress bar
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
-    st.markdown("# 🔍 Company Research")
-    st.caption("The intelligence hub — research any company in seconds.")
-    st.markdown("---")
-    
-    col1, col2, col3 = st.columns([2, 2, 1])
-    with col1:
-        company_name = st.text_input("Company Name", placeholder="e.g. Nyaho Medical Centre", label_visibility="collapsed")
-    with col2:
-        website = st.text_input("Website", placeholder="e.g. nyahoclinic.com", label_visibility="collapsed")
-    with col3:
-        run = st.button("🔍 Research", type="primary", use_container_width=True)
-    
-    if run and (company_name or website):
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    # Simple progress tracking without nonlocal
+    class ProgressTracker:
+        def __init__(self):
+            self.step = 0
+            self.total_steps = 6
         
-        def update_progress(msg):
-            status_text.text(msg)
-            # Increment progress
-            current = progress_bar.progress.value if hasattr(progress_bar, 'value') else 0
-            progress_bar.progress(min(current + 0.1, 0.95))
-        
-        try:
-            with st.spinner("Researching..."):
-                result = research_company(company_name=company_name, website=website, progress_cb=update_progress)
-                lead = score_from_research(result)
-                
-                # Detect technologies
-                mx_vals = []
-                if result.dns_result and hasattr(result.dns_result, 'findings'):
-                    mx_vals = [f.value for f in result.dns_result.findings if f.check == "MX Records" and f.value]
-                tech = detect_technologies(result.website, mx_records=mx_vals) if result.website else None
-                
-                # Save to database
-                db = get_session()
-                try:
-                    history = ResearchHistory(
-                        company_name=result.company_name,
-                        website=result.website or "",
-                        searched_at=datetime.utcnow(),
-                        result_summary=f"{lead.total}/100 {lead.status}"
-                    )
-                    db.add(history)
-                    db.commit()
-                except Exception as db_error:
-                    st.warning(f"Could not save to database: {db_error}")
-                finally:
-                    db.close()
-                
-                # Save to CRM
-                try:
-                    cid = save_research_to_crm(result, result.dns_result, result.website_result, lead)
-                    st.session_state["last_company_id"] = cid
-                except Exception as crm_error:
-                    st.warning(f"Could not save to CRM: {crm_error}")
-                
-                # Store in session
-                st.session_state["last_research"] = result
-                st.session_state["last_lead_score"] = lead
-                st.session_state["last_tech"] = tech
-                
-                progress_bar.progress(1.0)
-                status_text.text("Complete!")
-                
-                st.success(f"✅ **{result.company_name}** — Lead Score: **{lead.total}/100 ({lead.status})**")
-                
-        except Exception as research_error:
-            st.error(f"Research failed: {str(research_error)}")
-            st.stop()
-    
-    # Display results if available
-    if "last_research" in st.session_state:
-        result = st.session_state["last_research"]
-        lead = st.session_state["last_lead_score"]
-        tech = st.session_state.get("last_tech")
-        
-        # Display company info
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.markdown(f"## {result.company_name}")
-            st.caption(f"🌐 {result.website or '—'} | 📞 {result.phone or '—'} | ✉️ {result.email or '—'}")
-        with col2:
-            st.metric("Lead Score", f"{lead.total}/100", delta=lead.status)
-        with col3:
-            st.metric("Confidence", f"{int(result.confidence_score)}%", delta=result.confidence_label)
-        
-        st.markdown("---")
-        
-        # Simple tabs
-        tabs = st.tabs(["Overview", "Contacts", "Technology", "Actions"])
-        
-        with tabs[0]:
-            st.markdown("**Company Information**")
-            st.write(f"**Name:** {result.company_name}")
-            st.write(f"**Website:** {result.website or 'N/A'}")
-            st.write(f"**Phone:** {result.phone or 'N/A'}")
-            st.write(f"**Email:** {result.email or 'N/A'}")
-            st.write(f"**Address:** {result.address or 'N/A'}")
-            if result.description:
-                st.write(f"**Description:** {result.description}")
-        
-        with tabs[1]:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Emails Found**")
-                if result.crawl_result and result.crawl_result.emails:
-                    for email in result.crawl_result.emails:
-                        st.code(email)
-                else:
-                    st.caption("No emails found")
-            
-            with col2:
-                st.markdown("**Phone Numbers Found**")
-                if result.crawl_result and result.crawl_result.phones:
-                    for phone in result.crawl_result.phones[:5]:
-                        st.code(phone)
-                else:
-                    st.caption("No phones found")
-        
-        with tabs[2]:
-            if tech and tech.detected:
-                st.markdown("**Detected Technologies**")
-                st.write(", ".join(tech.detected))
+        def update(self, message):
+            status_text.text(message)
+            # Update step based on message
+            if "Searching" in message:
+                self.step = 1
+            elif "Verifying" in message:
+                self.step = 2
+            elif "Crawling" in message:
+                self.step = 3
+            elif "DNS" in message:
+                self.step = 4
+            elif "Calculating" in message or "Analyzing" in message:
+                self.step = 5
+            elif "Saving" in message:
+                self.step = 6
+            elif "Complete" in message:
+                self.step = self.total_steps
             else:
-                st.info("No technologies detected")
-        
-        with tabs[3]:
-            st.markdown("**Recommended Actions**")
+                # Increment slowly
+                self.step = min(self.step + 0.5, self.total_steps)
+            
+            # Update progress bar
+            progress_value = self.step / self.total_steps
+            progress_bar.progress(min(progress_value, 1.0))
+    
+    tracker = ProgressTracker()
+    
+    def update_progress(message):
+        tracker.update(message)
+    
+    try:
+        with st.spinner("Researching..."):
+            # Run research with callback
+            result = research_company(
+                company_name=company_name, 
+                website=website, 
+                progress_cb=update_progress
+            )
+            
+            # Score the lead
+            update_progress("Calculating lead score...")
+            lead = score_from_research(result)
+            
+            # Detect technologies
+            update_progress("Analyzing technologies...")
+            tech = None
+            try:
+                if result.website:
+                    tech = detect_technologies(result.website)
+            except Exception:
+                tech = None
+            
+            # Save to database
+            update_progress("Saving to database...")
+            db = get_session()
+            try:
+                history = ResearchHistory(
+                    company_name=result.company_name,
+                    website=result.website or "",
+                    searched_at=datetime.utcnow(),
+                    result_summary=f"{lead.total}/100 {lead.status}"
+                )
+                db.add(history)
+                db.commit()
+            except Exception as db_error:
+                st.warning(f"Could not save to database: {db_error}")
+            finally:
+                db.close()
+            
+            # Save to CRM
+            try:
+                cid = save_research_to_crm(result, result.dns_result, result.website_result, lead)
+                st.session_state["last_company_id"] = cid
+            except Exception as crm_error:
+                st.warning(f"Could not save to CRM: {crm_error}")
+            
+            # Store in session
+            st.session_state["last_research"] = result
+            st.session_state["last_lead_score"] = lead
+            st.session_state["last_tech"] = tech
+            
+            # Complete
+            update_progress("Complete!")
+            progress_bar.progress(1.0)
+            status_text.text("Complete!")
+            
+            st.success(f"✅ **{result.company_name}** — Lead Score: **{lead.total}/100 ({lead.status})**")
+            
+    except Exception as research_error:
+        st.error(f"Research failed: {str(research_error)}")
+        import traceback
+        with st.expander("Show error details"):
+            st.code(traceback.format_exc())
+        st.stop()
+
+# Display results if available
+if "last_research" in st.session_state:
+    result = st.session_state["last_research"]
+    lead = st.session_state["last_lead_score"]
+    tech = st.session_state.get("last_tech")
+    dns = result.dns_result
+    web = result.website_result
+    crawl = result.crawl_result
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    hc1, hc2, hc3 = st.columns([3, 1, 1])
+    with hc1:
+        st.markdown(f"## {result.company_name}")
+        st.caption(f"🌐 {result.website or '—'}  |  📞 {result.phone or '—'}  |  ✉️ {result.email or '—'}")
+    with hc2:
+        score_cls = "score-hot" if lead.total >= 90 else "score-warm" if lead.total >= 70 else "score-good"
+        st.markdown(f"""<div style="text-align:center">
+            <div class="score-ring {score_cls}" style="margin:auto;font-size:1.5rem">{lead.total}<br><span style="font-size:0.6rem">/100</span></div>
+            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.4rem">Lead Score</div>
+        </div>""", unsafe_allow_html=True)
+    with hc3:
+        conf_cls = "score-good" if result.confidence_score >= 80 else "score-warm" if result.confidence_score >= 60 else "score-hot"
+        st.markdown(f"""<div style="text-align:center">
+            <div class="score-ring {conf_cls}" style="margin:auto;font-size:1.5rem">{int(result.confidence_score)}<br><span style="font-size:0.6rem">%</span></div>
+            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.4rem">Confidence</div>
+        </div>""", unsafe_allow_html=True)
+    
+    st.markdown("---")
+    tab_ov, tab_con, tab_tech, tab_audit, tab_opp = st.tabs(["📋 Overview", "👤 Contacts", "💻 Technology", "🛡️ Audit", "💰 Opportunities"])
+    
+    with tab_ov:
+        col_left, col_right = st.columns(2)
+        with col_left:
+            st.markdown('<div class="data-card"><h4>Company Profile</h4>', unsafe_allow_html=True)
+            for label, val in [
+                ("Company", result.company_name),
+                ("Website", result.website or "—"),
+                ("Phone", result.phone or "—"),
+                ("Email", result.email or "—"),
+                ("Address", result.address or "—"),
+                ("Confidence", f"{result.confidence_score:.0f}% — {result.confidence_label}"),
+                ("Sources", ", ".join(result.sources) if result.sources else "—")
+            ]:
+                st.markdown(f'<div class="profile-row"><span class="profile-label">{label}</span><span class="profile-value">{val}</span></div>', unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+        with col_right:
+            if result.description:
+                st.markdown(f'<div class="data-card"><h4>About</h4><p style="color:#e2e8f0">{result.description[:400]}</p></div>', unsafe_allow_html=True)
+            st.markdown('<div class="data-card"><h4>Website Status</h4>', unsafe_allow_html=True)
+            if web:
+                ssl_valid = False
+                if web.ssl and hasattr(web.ssl, 'valid'):
+                    ssl_valid = web.ssl.valid
+                for label2, val2 in [
+                    ("Reachable", "✅ Yes" if web.reachable else "❌ No"),
+                    ("HTTPS", "✅ Yes" if web.https else "❌ No"),
+                    ("SSL Valid", "✅ Yes" if ssl_valid else "❌ No"),
+                    ("Response", f"{web.response_time_ms}ms" if web.response_time_ms else "—"),
+                    ("Title", (web.title or "—")[:50])
+                ]:
+                    st.markdown(f'<div class="profile-row"><span class="profile-label">{label2}</span><span class="profile-value">{val2}</span></div>', unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+    
+    with tab_con:
+        if crawl and (crawl.emails or crawl.phones or crawl.social_links):
+            col_left, col_right = st.columns(2)
+            with col_left:
+                st.markdown('<div class="data-card"><h4>Emails Found</h4>', unsafe_allow_html=True)
+                for email_item in (crawl.emails or []):
+                    st.code(email_item)
+                if not crawl.emails:
+                    st.caption("None found")
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown('<div class="data-card"><h4>Phone Numbers</h4>', unsafe_allow_html=True)
+                for phone_item in (crawl.phones or [])[:5]:
+                    st.code(phone_item)
+                if not crawl.phones:
+                    st.caption("None found")
+                st.markdown("</div>", unsafe_allow_html=True)
+            with col_right:
+                st.markdown('<div class="data-card"><h4>Social Profiles</h4>', unsafe_allow_html=True)
+                for platform, url in (crawl.social_links or {}).items():
+                    st.markdown(f"[{platform.title()}]({url})")
+                if not crawl.social_links:
+                    st.caption("None found")
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="empty-state"><div class="empty-state-icon">👤</div><div class="empty-state-title">No contact data extracted</div><div class="empty-state-sub">Website may not be crawlable</div></div>', unsafe_allow_html=True)
+    
+    with tab_tech:
+        if tech and hasattr(tech, 'detected') and tech.detected:
+            st.markdown('<div class="data-card"><h4>Detected Technologies</h4>', unsafe_allow_html=True)
+            st.markdown("".join(f'<span class="tech-chip">✦ {t}</span>' for t in tech.detected), unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+            if hasattr(tech, 'categories') and tech.categories:
+                cats = list(tech.categories.items())
+                cols = st.columns(min(len(cats), 4))
+                for col, (cat, items) in zip(cols, cats):
+                    with col:
+                        st.markdown(f'<div class="data-card"><h4>{cat}</h4>', unsafe_allow_html=True)
+                        for item in items:
+                            st.markdown(f"• {item}")
+                        st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="empty-state"><div class="empty-state-icon">💻</div><div class="empty-state-title">No technologies detected</div><div class="empty-state-sub">Run research on a live website</div></div>', unsafe_allow_html=True)
+    
+    with tab_audit:
+        if dns:
+            s1, s2, s3 = st.columns(3)
+            ssl_score = 0
+            if web and web.ssl and hasattr(web.ssl, 'valid') and web.ssl.valid:
+                ssl_score = 100
+            audit_items = [
+                ("Email Security", dns.score, "#22c55e" if dns.score >= 75 else "#f97316" if dns.score >= 50 else "#ef4444", dns.grade),
+                ("SSL / HTTPS", ssl_score, "#22c55e" if ssl_score else "#ef4444", "A" if ssl_score else "F"),
+                ("Lead Opportunity", lead.total, "#ef4444" if lead.total >= 90 else "#f97316" if lead.total >= 70 else "#22c55e", "Hot" if lead.total >= 90 else "Warm" if lead.total >= 70 else "Cold"),
+            ]
+            for col, (title, score, color, grade) in zip([s1, s2, s3], audit_items):
+                with col:
+                    st.markdown(f'''<div class="scorecard">
+                        <div class="scorecard-title">{title}</div>
+                        <div class="scorecard-score" style="color:{color}">{score}</div>
+                        <div class="scorecard-grade">Grade: {grade}</div>
+                    </div>''', unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            for finding in dns.findings:
+                status = getattr(finding, 'status', 'WARNING')
+                check = getattr(finding, 'check', 'Unknown')
+                detail = getattr(finding, 'detail', 'No details')
+                if status == "PASS":
+                    st.success(f"✅ **{check}** — {detail}")
+                elif status == "FAIL":
+                    st.error(f"❌ **{check}** — {detail}")
+                else:
+                    st.warning(f"⚠️ **{check}** — {detail}")
+        else:
+            st.info("DNS audit not available.")
+    
+    with tab_opp:
+        col_left, col_right = st.columns(2)
+        with col_left:
+            st.markdown('<div class="data-card"><h4>Score Breakdown</h4>', unsafe_allow_html=True)
+            triggered = [rule for rule in lead.rules if rule.triggered]
+            for rule in triggered:
+                st.markdown(f'<div class="profile-row"><span class="profile-label" style="color:#fb923c">+{rule.points}</span><span class="profile-value">{rule.reason}</span></div>', unsafe_allow_html=True)
+            if not triggered:
+                st.caption("No critical issues")
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f'<div class="data-card"><h4>Opportunity Summary</h4><p style="color:#e2e8f0;font-size:0.85rem">{lead.opportunity_summary}</p></div>', unsafe_allow_html=True)
+        with col_right:
+            st.markdown('<div class="data-card"><h4>Recommended Services</h4>', unsafe_allow_html=True)
+            actions = []
+            if dns and hasattr(dns, 'has_dmarc') and not dns.has_dmarc:
+                actions.append(("📧", "Fix email security", "Business Email Fix"))
+            if web and web.ssl and hasattr(web.ssl, 'valid') and not web.ssl.valid:
+                actions.append(("🔒", "Fix SSL certificate", "Website Security"))
             if not result.email:
-                st.warning("📧 No email found - Setup professional email")
-            if not result.phone:
-                st.warning("📞 No phone found - Add contact number")
-            if result.dns_result and not result.dns_result.has_dmarc:
-                st.warning("🔒 No DMARC - Improve email security")
-            st.info("📊 Schedule a full IT audit")
-        
-        # Action buttons
-        st.markdown("---")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            if st.button("🔄 New Search", use_container_width=True):
-                for k in ["last_research", "last_lead_score", "last_tech", "last_company_id"]:
-                    st.session_state.pop(k, None)
-                st.rerun()
-    else:
-        # Empty state
-        st.info("👈 Enter a company name or website above and click 'Research' to begin")
+                actions.append(("📬", "Setup professional email", "Email Setup"))
+            actions.append(("📊", "Full infrastructure audit", "IT Audit"))
+            for icon, action, svc in actions:
+                st.markdown(f'<div class="profile-row"><span class="profile-label">{icon}</span><span class="profile-value">{action} <span class="badge badge-info">{svc}</span></span></div>', unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.markdown("---")
+    col_a, col_b, col_c, col_d = st.columns(4)
+    with col_a:
+        if st.button("🧠 AI Analysis", use_container_width=True):
+            try:
+                st.switch_page("pages/Lead_Intelligence.py")
+            except Exception:
+                st.info("Please navigate to Lead Intelligence from sidebar")
+    with col_b:
+        if st.button("📄 Proposal", use_container_width=True):
+            try:
+                st.switch_page("pages/Proposal_Generator.py")
+            except Exception:
+                st.info("Please navigate to Proposal Generator from sidebar")
+    with col_c:
+        if st.button("👥 CRM", use_container_width=True):
+            try:
+                st.switch_page("pages/CRM.py")
+            except Exception:
+                st.info("Please navigate to CRM from sidebar")
+    with col_d:
+        if st.button("🔄 New Search", use_container_width=True):
+            for key in ["last_research", "last_lead_score", "last_tech", "last_company_id"]:
+                st.session_state.pop(key, None)
+            st.rerun()
+
+else:
+    # Empty state
+    st.markdown("""
+        <div class="empty-state" style="margin-top:5rem">
+            <div class="empty-state-icon">🔍</div>
+            <div class="empty-state-title">Search for a company to begin</div>
+            <div class="empty-state-sub">Enter a company name or website above and click Research</div>
+        </div>
+    """, unsafe_allow_html=True)
