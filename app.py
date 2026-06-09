@@ -788,7 +788,6 @@ Another Company
 Third Company
 Required field: name
 Optional fields: website, email, phone, address, lead_score
-""")
 
 st.markdown("---")
 
