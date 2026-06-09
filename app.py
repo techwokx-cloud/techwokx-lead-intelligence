@@ -8,12 +8,10 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
-import hashlib
-import time
 
 # ============ PAGE CONFIG ============
 st.set_page_config(
-    page_title="TechWokx Enterprise Suite",
+    page_title="TechWokx Lead Intelligence",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -32,16 +30,11 @@ if 'email_log' not in st.session_state:
     st.session_state.email_log = []
 if 'followup_queue' not in st.session_state:
     st.session_state.followup_queue = []
-if 'jobs' not in st.session_state:
-    st.session_state.jobs = []
-if 'bid_history' not in st.session_state:
-    st.session_state.bid_history = []
 
 # ============ FILE STORAGE ============
 os.makedirs("data", exist_ok=True)
 LEADS_FILE = "data/leads.json"
 EMAIL_LOG_FILE = "data/email_log.json"
-JOBS_FILE = "data/jobs.json"
 
 def load_leads():
     try:
@@ -96,30 +89,6 @@ SMTP_CONFIG = {
     "use_ssl": True,
     "daily_limit": 20,
     "sent_today": 0
-}
-
-# ============ EMAIL TEMPLATES ============
-EMAIL_TEMPLATES = {
-    "initial": {
-        "name": "Initial Outreach",
-        "subject": "IT Assessment for {company} - Score: {score}/100",
-        "days_delay": 0
-    },
-    "followup_1": {
-        "name": "First Follow-up",
-        "subject": "Following up on your IT assessment",
-        "days_delay": 3
-    },
-    "followup_2": {
-        "name": "Second Follow-up",
-        "subject": "Special offer for {company}",
-        "days_delay": 7
-    },
-    "proposal": {
-        "name": "Proposal",
-        "subject": "Custom IT proposal for {company}",
-        "days_delay": 14
-    }
 }
 
 # ============ EMAIL FUNCTIONS ============
@@ -199,10 +168,7 @@ def generate_proposal_email(lead):
 
 def send_proposal(lead):
     """Send proposal email to lead"""
-    subject = EMAIL_TEMPLATES["initial"]["subject"].format(
-        company=lead.get('name', ''),
-        score=lead.get('lead_score', 50)
-    )
+    subject = f"IT Assessment for {lead.get('name', '')} - Score: {lead.get('lead_score', 50)}/100"
     body = generate_proposal_email(lead)
     
     success, msg = send_email(lead.get('email', ''), subject, body)
@@ -231,22 +197,20 @@ def process_followups():
     for lead in st.session_state.leads:
         if lead.get('email_sent') and not lead.get('email_responded'):
             if lead.get('next_followup'):
-                next_date = datetime.fromisoformat(lead['next_followup'])
-                if now >= next_date:
-                    stage = lead.get('followup_stage', 1)
-                    if stage <= 3:
-                        template_key = f"followup_{stage}"
-                        if template_key in EMAIL_TEMPLATES:
-                            subject = EMAIL_TEMPLATES[template_key]["subject"].format(
-                                company=lead.get('name', '')
-                            )
-                            body = generate_proposal_email(lead)
-                            success, _ = send_email(lead.get('email', ''), subject, body)
-                            
-                            if success:
-                                lead['followup_stage'] = stage + 1
-                                lead['next_followup'] = (datetime.now() + timedelta(days=3)).isoformat()
-                                save_leads()
+                try:
+                    next_date = datetime.fromisoformat(lead['next_followup'])
+                    if now >= next_date:
+                        stage = lead.get('followup_stage', 1)
+                        subject = f"Following up on your IT assessment - {lead.get('name', '')}"
+                        body = generate_proposal_email(lead)
+                        success, _ = send_email(lead.get('email', ''), subject, body)
+                        
+                        if success:
+                            lead['followup_stage'] = stage + 1
+                            lead['next_followup'] = (datetime.now() + timedelta(days=3)).isoformat()
+                            save_leads()
+                except:
+                    pass
 
 # ============ DEEP SEARCH FUNCTIONS ============
 def deep_search_company(company_name):
@@ -272,51 +236,7 @@ def deep_search_company(company_name):
             "Schedule free consultation call"
         ]
     }
-    
-    # Try real SERP API if key exists
-    try:
-        serp_key = st.secrets.get("SERP_API_KEY", "")
-        if serp_key:
-            # Would call actual API here
-            pass
-    except:
-        pass
-    
     return result
-
-# ============ FREELANCE JOB SEARCH ============
-def search_freelance_jobs(keyword="data entry"):
-    """Search for freelance jobs"""
-    jobs = [
-        {
-            "id": 1,
-            "title": f"{keyword.title()} Specialist Needed",
-            "description": f"We need an experienced {keyword} specialist for ongoing work.",
-            "platform": "Upwork",
-            "budget": "$15-25/hr",
-            "skills": [keyword, "excel", "communication"],
-            "posted": "2 hours ago"
-        },
-        {
-            "id": 2,
-            "title": f"{keyword.title()} Project - 1000 records",
-            "description": f"Looking for someone to handle {keyword} for a large dataset.",
-            "platform": "Freelancer",
-            "budget": "$100-200",
-            "skills": [keyword, "attention to detail"],
-            "posted": "1 day ago"
-        },
-        {
-            "id": 3,
-            "title": f"Virtual Assistant with {keyword.title()} Skills",
-            "description": f"Need VA with strong {keyword} background for administrative tasks.",
-            "platform": "Upwork",
-            "budget": "$10-20/hr",
-            "skills": [keyword, "administrative", "communication"],
-            "posted": "3 hours ago"
-        }
-    ]
-    return jobs
 
 # ============ LEAD FUNCTIONS ============
 def add_lead(lead_data):
@@ -358,6 +278,81 @@ def delete_lead(lead_id):
     save_leads()
     return True
 
+def update_lead_response(lead_id, responded=True):
+    for lead in st.session_state.leads:
+        if lead['id'] == lead_id:
+            lead['email_responded'] = responded
+            save_leads()
+            return True
+    return False
+
+# ============ IMPORT/EXPORT FUNCTIONS ============
+def import_csv(file):
+    try:
+        df = pd.read_csv(file)
+        imported = 0
+        for _, row in df.iterrows():
+            if row.get('name'):
+                add_lead({
+                    "name": row.get('name'),
+                    "email": row.get('email', ''),
+                    "phone": str(row.get('phone', '')),
+                    "website": row.get('website', ''),
+                    "address": row.get('address', ''),
+                    "lead_score": int(row.get('lead_score', 50)),
+                    "source": "CSV Import"
+                })
+                imported += 1
+        return True, f"Imported {imported} leads"
+    except Exception as e:
+        return False, str(e)
+
+def import_json(file):
+    try:
+        data = json.load(file)
+        if isinstance(data, list):
+            leads_list = data
+        elif isinstance(data, dict) and 'leads' in data:
+            leads_list = data['leads']
+        else:
+            return False, "Invalid JSON format"
+        
+        imported = 0
+        for item in leads_list:
+            if item.get('name'):
+                add_lead({
+                    "name": item.get('name'),
+                    "email": item.get('email', ''),
+                    "phone": str(item.get('phone', '')),
+                    "website": item.get('website', ''),
+                    "address": item.get('address', ''),
+                    "lead_score": int(item.get('lead_score', 50)),
+                    "source": "JSON Import"
+                })
+                imported += 1
+        return True, f"Imported {imported} leads"
+    except Exception as e:
+        return False, str(e)
+
+def import_text(file):
+    try:
+        content = file.read().decode('utf-8')
+        lines = [l.strip() for l in content.split('\n') if l.strip()]
+        imported = 0
+        for line in lines:
+            add_lead({"name": line, "source": "Text Import"})
+            imported += 1
+        return True, f"Imported {imported} leads"
+    except Exception as e:
+        return False, str(e)
+
+def export_csv():
+    df = pd.DataFrame(st.session_state.leads)
+    return df.to_csv(index=False)
+
+def export_json():
+    return json.dumps(st.session_state.leads, indent=2, default=str)
+
 # ============ CSS ============
 st.markdown("""
 <style>
@@ -384,7 +379,7 @@ if not st.session_state.authenticated:
     st.markdown("""
     <div style="max-width: 400px; margin: 100px auto; padding: 2rem; background: white; border-radius: 24px; text-align: center;">
         <h1 style="color: #667eea;">TechWokx</h1>
-        <p>Enterprise Suite</p>
+        <p>Lead Intelligence Suite</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -410,10 +405,12 @@ with st.sidebar:
     menu = {
         "Dashboard": "dashboard",
         "Deep Company Search": "search",
+        "Import Leads": "import",
         "Lead CRM": "crm",
+        "Export Leads": "export",
         "Email Automation": "email",
-        "Freelance Jobs": "jobs",
         "Settings": "settings",
+        "Freelance Jobs": "freelance",
         "Logout": "logout"
     }
     
@@ -422,6 +419,9 @@ with st.sidebar:
             if key == "logout":
                 st.session_state.authenticated = False
                 st.rerun()
+            elif key == "freelance":
+                # Navigate to freelance page
+                st.switch_page("pages/freelance.py")
             else:
                 st.session_state.current_page = key
                 st.rerun()
@@ -434,48 +434,57 @@ with st.sidebar:
 if st.session_state.current_page == 'dashboard':
     total = len(st.session_state.leads)
     hot = sum(1 for l in st.session_state.leads if l.get("lead_score", 0) >= 70)
+    warm = sum(1 for l in st.session_state.leads if 50 <= l.get("lead_score", 0) < 70)
+    cold = sum(1 for l in st.session_state.leads if l.get("lead_score", 0) < 50)
     emails = len(st.session_state.email_log)
     
-    st.markdown('<div class="welcome-card"><h2>Welcome to TechWokx</h2><p>Lead Intelligence | Email Automation | Freelance Jobs</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="welcome-card"><h2>Welcome to TechWokx Lead Intelligence</h2><p>AI-powered Company Research | Email Automation | Lead Management</p></div>', unsafe_allow_html=True)
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.markdown(f"<div class='metric-card'><div class='metric-value'>{total}</div><div class='metric-label'>Total Leads</div></div>", unsafe_allow_html=True)
     with col2:
         st.markdown(f"<div class='metric-card'><div class='metric-value'>{hot}</div><div class='metric-label'>Hot Leads</div></div>", unsafe_allow_html=True)
     with col3:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{emails}</div><div class='metric-label'>Emails Sent</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{warm}</div><div class='metric-label'>Warm Leads</div></div>", unsafe_allow_html=True)
     with col4:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{len(st.session_state.jobs)}</div><div class='metric-label'>Jobs Found</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{cold}</div><div class='metric-label'>Cold Leads</div></div>", unsafe_allow_html=True)
+    with col5:
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{emails}</div><div class='metric-label'>Emails Sent</div></div>", unsafe_allow_html=True)
     
     st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     with col1:
         st.markdown('<div class="section-header">Recent Leads</div>', unsafe_allow_html=True)
-        for lead in st.session_state.leads[-5:]:
-            status_class = "status-hot" if lead.get("lead_score", 0) >= 70 else "status-warm" if lead.get("lead_score", 0) >= 50 else "status-cold"
-            st.markdown(f"<div class='data-card'><strong>{lead['name']}</strong> - Score: {lead['lead_score']}/100 <span class='{status_class}'>{lead['status']}</span><br><small>Added: {lead['created_at'][:10]}</small></div>", unsafe_allow_html=True)
+        if st.session_state.leads:
+            for lead in st.session_state.leads[-5:]:
+                status_class = "status-hot" if lead.get("lead_score", 0) >= 70 else "status-warm" if lead.get("lead_score", 0) >= 50 else "status-cold"
+                st.markdown(f"<div class='data-card'><strong>{lead['name']}</strong> - Score: {lead['lead_score']}/100 <span class='{status_class}'>{lead['status']}</span><br><small>Added: {lead['created_at'][:10]}</small></div>", unsafe_allow_html=True)
+        else:
+            st.info("No leads yet. Use Deep Search or Import Leads.")
     
     with col2:
         st.markdown('<div class="section-header">Quick Actions</div>', unsafe_allow_html=True)
         if st.button("Deep Search Company", use_container_width=True):
             st.session_state.current_page = 'search'
             st.rerun()
+        if st.button("Import Leads", use_container_width=True):
+            st.session_state.current_page = 'import'
+            st.rerun()
         if st.button("Send Proposals", use_container_width=True):
             st.session_state.current_page = 'email'
             st.rerun()
-        if st.button("Find Jobs", use_container_width=True):
-            st.session_state.current_page = 'jobs'
-            st.rerun()
+        if st.button("Find Freelance Jobs", use_container_width=True):
+            st.switch_page("pages/freelance.py")
 
 # ============ DEEP COMPANY SEARCH ============
 elif st.session_state.current_page == 'search':
     st.markdown('<div class="section-header">Deep Company Search</div>', unsafe_allow_html=True)
-    st.caption("AI-powered search with SERP API integration")
+    st.caption("AI-powered search - Find companies and add to CRM")
     st.markdown("---")
     
-    company_name = st.text_input("Company Name", placeholder="e.g. Prime Meridian Docks")
+    company_name = st.text_input("Company Name", placeholder="e.g. Prime Meridian Docks, MTN Ghana")
     
     if st.button("Deep Search", type="primary"):
         if company_name:
@@ -497,6 +506,12 @@ elif st.session_state.current_page == 'search':
                         <p><strong>Employees:</strong> {result['employee_count']}</p>
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    if result.get('contacts'):
+                        st.markdown("<div class='data-card'><h4>Contacts Found</h4>", unsafe_allow_html=True)
+                        for c in result['contacts']:
+                            st.write(f"- {c['name']} ({c['title']})")
+                        st.markdown("</div>", unsafe_allow_html=True)
                 
                 with col2:
                     st.markdown(f"""
@@ -538,6 +553,71 @@ elif st.session_state.current_page == 'search':
         else:
             st.warning("Enter company name")
 
+# ============ IMPORT LEADS ============
+elif st.session_state.current_page == 'import':
+    st.markdown('<div class="section-header">Import Leads</div>', unsafe_allow_html=True)
+    st.caption("Import leads from CSV, JSON, or Text files")
+    st.markdown("---")
+    
+    with st.expander("Format Instructions"):
+        st.markdown("""
+        **CSV Format:** name,email,phone,website,address,lead_score
+        **JSON Format:** [{"name": "Example", "email": "info@example.com"}]
+        **Text Format:** One company name per line
+        """)
+    
+    uploaded = st.file_uploader("Choose file", type=['csv', 'json', 'txt'])
+    
+    if uploaded:
+        ext = uploaded.name.split('.')[-1].lower()
+        if ext == 'csv':
+            success, msg = import_csv(uploaded)
+        elif ext == 'json':
+            success, msg = import_json(uploaded)
+        elif ext == 'txt':
+            success, msg = import_text(uploaded)
+        else:
+            success, msg = False, "Unsupported file type"
+        
+        if success:
+            st.success(msg)
+            st.rerun()
+        else:
+            st.error(msg)
+    
+    st.markdown("---")
+    st.markdown("### Manual Entry")
+    
+    with st.form("manual_lead"):
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Company Name*")
+            email = st.text_input("Email")
+            website = st.text_input("Website")
+        with col2:
+            phone = st.text_input("Phone")
+            address = st.text_input("Address")
+            score = st.slider("Lead Score", 0, 100, 50)
+        
+        if st.form_submit_button("Add Lead", type="primary"):
+            if name:
+                success, msg = add_lead({
+                    "name": name,
+                    "email": email,
+                    "phone": phone,
+                    "website": website,
+                    "address": address,
+                    "lead_score": score,
+                    "source": "Manual Entry"
+                })
+                if success:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.warning(msg)
+            else:
+                st.error("Company name is required")
+
 # ============ LEAD CRM ============
 elif st.session_state.current_page == 'crm':
     st.markdown('<div class="section-header">Lead CRM</div>', unsafe_allow_html=True)
@@ -545,27 +625,35 @@ elif st.session_state.current_page == 'crm':
     st.markdown("---")
     
     if st.session_state.leads:
-        search = st.text_input("Search", placeholder="Search by name, email")
+        search = st.text_input("Search", placeholder="Search by name, email, or website")
         
         filtered = st.session_state.leads
         if search:
-            filtered = [l for l in filtered if search.lower() in l.get('name', '').lower() or search.lower() in l.get('email', '').lower()]
+            filtered = [l for l in filtered if search.lower() in l.get('name', '').lower() or search.lower() in l.get('email', '').lower() or search.lower() in l.get('website', '').lower()]
+        
+        st.caption(f"Showing {len(filtered)} of {len(st.session_state.leads)} leads")
         
         for lead in filtered:
             status_class = "status-hot" if lead.get("lead_score", 0) >= 70 else "status-warm" if lead.get("lead_score", 0) >= 50 else "status-cold"
             with st.expander(f"{lead['name']} - Score: {lead['lead_score']}/100 - {lead['status']}"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.write(f"Email: {lead.get('email', 'N/A')}")
-                    st.write(f"Phone: {lead.get('phone', 'N/A')}")
-                    st.write(f"Website: {lead.get('website', 'N/A')}")
+                    st.write(f"**Email:** {lead.get('email', 'N/A')}")
+                    st.write(f"**Phone:** {lead.get('phone', 'N/A')}")
+                    st.write(f"**Website:** {lead.get('website', 'N/A')}")
                 with col2:
-                    st.write(f"Added: {lead['created_at'][:10]}")
-                    st.write(f"Email Sent: {'Yes' if lead.get('email_sent') else 'No'}")
+                    st.write(f"**Added:** {lead['created_at'][:10]}")
+                    st.write(f"**Email Sent:** {'Yes' if lead.get('email_sent') else 'No'}")
                     if lead.get('email_sent_date'):
-                        st.write(f"Sent: {lead['email_sent_date'][:10]}")
+                        st.write(f"**Sent Date:** {lead['email_sent_date'][:10]}")
+                    st.write(f"**Follow-up Stage:** {lead.get('followup_stage', 0)}/4")
                 
-                col1, col2, col3 = st.columns(3)
+                if lead.get('contacts'):
+                    st.write("**Contacts Found:**")
+                    for c in lead.get('contacts', []):
+                        st.write(f"- {c.get('name', '')} ({c.get('title', '')})")
+                
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     if lead.get('email') and not lead.get('email_sent'):
                         if st.button(f"Send Proposal", key=f"send_{lead['id']}"):
@@ -576,17 +664,56 @@ elif st.session_state.current_page == 'crm':
                             else:
                                 st.error(f"Failed: {msg}")
                 with col2:
-                    if lead.get('email'):
-                        st.info(f"Email: {lead['email']}")
+                    if lead.get('email_sent') and not lead.get('email_responded'):
+                        if st.button(f"Mark Responded", key=f"resp_{lead['id']}"):
+                            update_lead_response(lead['id'], True)
+                            st.success("Marked as responded!")
+                            st.rerun()
                 with col3:
+                    if st.button(f"Export", key=f"export_{lead['id']}"):
+                        lead_json = json.dumps(lead, indent=2)
+                        st.download_button("Download", lead_json, f"{lead['name']}.json", "application/json")
+                with col4:
                     if st.button(f"Delete", key=f"del_{lead['id']}"):
                         delete_lead(lead['id'])
                         st.rerun()
     else:
-        st.info("No leads yet. Use Deep Search to add leads.")
-        if st.button("Go to Deep Search"):
-            st.session_state.current_page = 'search'
-            st.rerun()
+        st.info("No leads yet. Use Deep Search or Import Leads to get started.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Deep Search Company", use_container_width=True):
+                st.session_state.current_page = 'search'
+                st.rerun()
+        with col2:
+            if st.button("Import Leads", use_container_width=True):
+                st.session_state.current_page = 'import'
+                st.rerun()
+
+# ============ EXPORT LEADS ============
+elif st.session_state.current_page == 'export':
+    st.markdown('<div class="section-header">Export Leads</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    
+    if st.session_state.leads:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            csv_data = export_csv()
+            st.download_button("Download CSV", csv_data, f"leads_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv", use_container_width=True)
+        
+        with col2:
+            json_data = export_json()
+            st.download_button("Download JSON", json_data, f"leads_{datetime.now().strftime('%Y%m%d')}.json", "application/json", use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown(f"**Total Leads:** {len(st.session_state.leads)}")
+        
+        with st.expander("Preview Data"):
+            preview_df = pd.DataFrame(st.session_state.leads)
+            st.dataframe(preview_df)
+    else:
+        st.info("No leads to export")
 
 # ============ EMAIL AUTOMATION ============
 elif st.session_state.current_page == 'email':
@@ -615,12 +742,19 @@ elif st.session_state.current_page == 'email':
                 st.rerun()
         else:
             st.info("No leads pending email")
+        
+        st.markdown("### Follow-up Settings")
+        st.info("Auto follow-up sequence: Day 0 (initial), Day 3, Day 7, Day 14")
     
     with col2:
         st.markdown("### Email Status")
         st.metric("Emails Sent Today", SMTP_CONFIG["sent_today"])
         st.metric("Daily Limit", SMTP_CONFIG["daily_limit"])
         st.progress(SMTP_CONFIG["sent_today"] / SMTP_CONFIG["daily_limit"])
+        
+        st.markdown("### Pending Follow-ups")
+        pending = len([l for l in st.session_state.leads if l.get('email_sent') and not l.get('email_responded')])
+        st.metric("Awaiting Response", pending)
     
     st.markdown("---")
     st.markdown("### Email Log")
@@ -631,36 +765,6 @@ elif st.session_state.current_page == 'email':
     else:
         st.info("No emails sent yet")
 
-# ============ FREELANCE JOBS ============
-elif st.session_state.current_page == 'jobs':
-    st.markdown('<div class="section-header">Freelance Jobs</div>', unsafe_allow_html=True)
-    st.caption("Find and bid on freelance opportunities")
-    st.markdown("---")
-    
-    keyword = st.text_input("Search Keyword", value="data entry")
-    
-    if st.button("Search Jobs", type="primary"):
-        with st.spinner("Searching..."):
-            jobs = search_freelance_jobs(keyword)
-            st.session_state.jobs = jobs
-        
-    if st.session_state.jobs:
-        for job in st.session_state.jobs:
-            with st.expander(f"{job['title']} - {job['platform']} - {job['budget']}"):
-                st.write(f"Description: {job['description']}")
-                st.write(f"Skills: {', '.join(job['skills'])}")
-                st.write(f"Posted: {job['posted']}")
-                
-                if st.button(f"Save Bid", key=f"bid_{job['id']}"):
-                    st.session_state.bid_history.append({
-                        "job": job['title'],
-                        "platform": job['platform'],
-                        "date": datetime.now().isoformat()
-                    })
-                    st.success("Bid saved!")
-    else:
-        st.info("Click Search Jobs to find opportunities")
-
 # ============ SETTINGS ============
 elif st.session_state.current_page == 'settings':
     st.markdown('<div class="section-header">Settings</div>', unsafe_allow_html=True)
@@ -668,7 +772,7 @@ elif st.session_state.current_page == 'settings':
     
     st.markdown("### Email Configuration")
     st.info(f"""
-    SMTP Settings:
+    **SMTP Settings:**
     - Host: {SMTP_CONFIG['host']}
     - Port: {SMTP_CONFIG['port']}
     - Username: {SMTP_CONFIG['username']}
@@ -676,16 +780,26 @@ elif st.session_state.current_page == 'settings':
     """)
     
     st.markdown("### Follow-up Sequence")
-    for key, template in EMAIL_TEMPLATES.items():
-        st.write(f"- {template['name']}: {template['days_delay']} days")
+    st.markdown("""
+    - **Day 0:** Initial Proposal Email
+    - **Day 3:** First Follow-up
+    - **Day 7:** Second Follow-up
+    - **Day 14:** Final Follow-up
+    """)
     
     st.markdown("### Data Management")
-    if st.button("Clear All Leads", type="secondary"):
-        st.session_state.leads = []
-        save_leads()
-        st.success("All leads cleared")
-        st.rerun()
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Clear All Leads", type="secondary"):
+            st.session_state.leads = []
+            save_leads()
+            st.success("All leads cleared")
+            st.rerun()
+    with col2:
+        if st.button("Reset Email Counter", type="secondary"):
+            SMTP_CONFIG["sent_today"] = 0
+            st.success("Email counter reset")
 
 # ============ FOOTER ============
 st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
-st.caption("2024 TechWokx Enterprise Suite | hello@techwokx.online | +233 555 087 407")
+st.caption("2024 TechWokx Lead Intelligence | hello@techwokx.online | +233 555 087 407")
