@@ -1,12 +1,13 @@
 import streamlit as st
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import requests
 import re
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import webbrowser
 
 # Page config
 st.set_page_config(
@@ -33,9 +34,18 @@ if 'leads' not in st.session_state:
     else:
         st.session_state.leads = []
 if 'email_log' not in st.session_state:
-    st.session_state.email_log = []
+    if os.path.exists("data/email_log.json"):
+        try:
+            with open("data/email_log.json", "r") as f:
+                st.session_state.email_log = json.load(f)
+        except:
+            st.session_state.email_log = []
+    else:
+        st.session_state.email_log = []
 if 'last_research' not in st.session_state:
     st.session_state.last_research = None
+if 'notification' not in st.session_state:
+    st.session_state.notification = None
 
 # Create data directory
 os.makedirs("data", exist_ok=True)
@@ -76,8 +86,27 @@ def save_leads():
     except Exception as e:
         print(f"Error saving leads: {e}")
 
+def save_email_log():
+    """Save email log to file"""
+    try:
+        with open("data/email_log.json", "w") as f:
+            json.dump(st.session_state.email_log, f, default=str)
+    except Exception as e:
+        print(f"Error saving email log: {e}")
+
 def add_lead(lead_data):
-    """Add lead to CRM"""
+    """Add lead to CRM with notification"""
+    # Check if lead already exists
+    existing = False
+    for lead in st.session_state.leads:
+        if lead.get('website') == lead_data.get('website') or lead.get('name') == lead_data.get('name'):
+            existing = True
+            break
+    
+    if existing:
+        st.session_state.notification = {"type": "warning", "message": f"⚠️ {lead_data.get('name')} already exists in CRM!"}
+        return None
+    
     lead = {
         "id": len(st.session_state.leads) + 1,
         "name": lead_data.get("name"),
@@ -90,11 +119,47 @@ def add_lead(lead_data):
         "recommendations": lead_data.get("recommendations", []),
         "description": lead_data.get("description", ""),
         "created_at": datetime.now().isoformat(),
-        "status": "New"
+        "status": "New",
+        "email_sent": False,
+        "email_sent_date": None,
+        "email_opened": False,
+        "email_responded": False,
+        "followup_date": None,
+        "followup_count": 0
     }
     st.session_state.leads.append(lead)
     save_leads()
+    st.session_state.notification = {"type": "success", "message": f"✅ {lead_data.get('name')} added to CRM successfully!"}
     return lead
+
+def update_lead_email_status(lead_id, action):
+    """Update email status for a lead"""
+    for lead in st.session_state.leads:
+        if lead['id'] == lead_id:
+            if action == "sent":
+                lead['email_sent'] = True
+                lead['email_sent_date'] = datetime.now().isoformat()
+                lead['followup_date'] = (datetime.now() + timedelta(days=3)).isoformat()
+                lead['followup_count'] = 1
+            elif action == "opened":
+                lead['email_opened'] = True
+            elif action == "responded":
+                lead['email_responded'] = True
+            save_leads()
+            return True
+    return False
+
+def get_leads_needing_followup():
+    """Get leads that need follow-up"""
+    now = datetime.now()
+    needs_followup = []
+    for lead in st.session_state.leads:
+        if lead.get('email_sent') and not lead.get('email_responded'):
+            if lead.get('followup_date'):
+                followup_date = datetime.fromisoformat(lead['followup_date'])
+                if now >= followup_date:
+                    needs_followup.append(lead)
+    return needs_followup
 
 # ============ COMPANY RESEARCH FUNCTIONS ============
 
@@ -121,7 +186,8 @@ def search_google_serp(api_key, business_name, location="Ghana"):
             "description": None,
             "address": None,
             "phone": None,
-            "social_links": []
+            "social_links": [],
+            "linkedin_url": None
         }
         
         if "knowledge_graph" in data:
@@ -131,6 +197,15 @@ def search_google_serp(api_key, business_name, location="Ghana"):
             result["description"] = kg.get("description", "")
             result["address"] = kg.get("address", "")
             result["phone"] = kg.get("phone", "")
+            
+            # Check for LinkedIn
+            if "profile" in kg:
+                for profile in kg.get("profile", []):
+                    if isinstance(profile, dict):
+                        if "linkedin" in profile.get("link", "").lower():
+                            result["linkedin_url"] = profile.get("link")
+                    elif isinstance(profile, str) and "linkedin" in profile.lower():
+                        result["linkedin_url"] = profile
         
         if "organic_results" in data and not result["description"]:
             for org in data["organic_results"][:2]:
@@ -141,6 +216,50 @@ def search_google_serp(api_key, business_name, location="Ghana"):
         return result
     except Exception as e:
         return None
+
+def crawl_website_for_emails(website):
+    """Deep crawl website to find emails"""
+    if not website:
+        return []
+    
+    all_emails = []
+    try:
+        if not website.startswith("http"):
+            website = "https://" + website
+        
+        # Try multiple pages
+        pages_to_check = [website, website + "/contact", website + "/about", website + "/team"]
+        
+        for page_url in pages_to_check[:3]:
+            try:
+                response = requests.get(page_url, timeout=10, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                })
+                
+                # Find emails
+                email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+                emails = re.findall(email_pattern, response.text)
+                
+                # Filter out false positives
+                exclude = ['example', 'test', 'noreply', 'placeholder', 'jpg', 'png', 'css', 'js']
+                valid_emails = [e for e in emails if not any(x in e.lower() for x in exclude)]
+                all_emails.extend(valid_emails)
+            except:
+                continue
+        
+        # Remove duplicates
+        all_emails = list(set(all_emails))
+        
+        # Prioritize business emails
+        business_keywords = ['info', 'contact', 'hello', 'support', 'sales', 'enquiries', 'admin', 'careers']
+        business_emails = [e for e in all_emails if any(kw in e.lower() for kw in business_keywords)]
+        
+        return {
+            "all_emails": all_emails[:5],
+            "primary_email": business_emails[0] if business_emails else (all_emails[0] if all_emails else None)
+        }
+    except Exception as e:
+        return {"all_emails": [], "primary_email": None}
 
 def find_contact_person(website):
     """Try to find contact person from website"""
@@ -158,16 +277,11 @@ def find_contact_person(website):
         soup = BeautifulSoup(response.text, 'html.parser')
         contacts = []
         
-        # Find emails
-        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-        emails = re.findall(email_pattern, response.text)
-        business_emails = [e for e in emails if not any(x in e.lower() for x in ['example', 'test', 'noreply'])]
-        
         # Look for about/team page
         about_links = []
         for link in soup.find_all('a', href=True):
             href = link.get('href', '').lower()
-            if 'about' in href or 'team' in href or 'management' in href:
+            if 'about' in href or 'team' in href or 'management' in href or 'leadership' in href:
                 full_url = urljoin(website, link.get('href'))
                 about_links.append(full_url)
         
@@ -175,11 +289,11 @@ def find_contact_person(website):
             try:
                 about_response = requests.get(about_links[0], timeout=10)
                 about_soup = BeautifulSoup(about_response.text, 'html.parser')
-                about_text = about_soup.get_text()
                 
                 # Look for names with titles
-                titles = ['CEO', 'Managing Director', 'General Manager', 'Founder', 'Director', 'Manager']
+                titles = ['CEO', 'Managing Director', 'General Manager', 'Founder', 'Director', 'Manager', 'IT Manager', 'CTO']
                 for title in titles:
+                    # Pattern for "Name, Title"
                     pattern = rf'([A-Z][a-z]+ [A-Z][a-z]+).*?{title}'
                     matches = re.findall(pattern, about_response.text, re.IGNORECASE)
                     for match in matches[:2]:
@@ -187,10 +301,7 @@ def find_contact_person(website):
             except:
                 pass
         
-        return {
-            "contacts": contacts[:3],
-            "business_emails": business_emails[:3]
-        }
+        return contacts[:3]
     except Exception as e:
         return None
 
@@ -259,7 +370,7 @@ def deep_research_company(company_name, serp_api_key=None, openai_api_key=None):
         "address": None,
         "description": None,
         "contacts": [],
-        "business_emails": [],
+        "linkedin_url": None,
         "website_status": None,
         "ai_insights": None,
         "lead_score": 0,
@@ -276,22 +387,26 @@ def deep_research_company(company_name, serp_api_key=None, openai_api_key=None):
             result["address"] = serp_data.get("address")
             result["phone"] = serp_data.get("phone")
             result["description"] = serp_data.get("description")
+            result["linkedin_url"] = serp_data.get("linkedin_url")
             result["sources"].append("Google Search")
     
     # Step 2: Check website status
     if result["website"]:
         result["website_status"] = check_website_status(result["website"])
         
-        # Step 3: Find contact person
-        contact_data = find_contact_person(result["website"])
-        if contact_data:
-            result["contacts"] = contact_data.get("contacts", [])
-            result["business_emails"] = contact_data.get("business_emails", [])
-            if result["business_emails"]:
-                result["email"] = result["business_emails"][0]
-                result["sources"].append("Website")
+        # Step 3: Crawl website for emails (deep crawl)
+        email_data = crawl_website_for_emails(result["website"])
+        if email_data and email_data.get("primary_email"):
+            result["email"] = email_data["primary_email"]
+            result["sources"].append("Website Crawl")
+        
+        # Step 4: Find contact persons
+        contacts = find_contact_person(result["website"])
+        if contacts:
+            result["contacts"] = contacts
+            result["sources"].append("Website")
     
-    # Step 4: AI Analysis
+    # Step 5: AI Analysis
     if openai_api_key:
         ai_insights = analyze_with_openai(openai_api_key, result)
         if ai_insights:
@@ -309,13 +424,13 @@ def deep_research_company(company_name, serp_api_key=None, openai_api_key=None):
     if result["phone"]:
         score += 10
     if result["email"]:
-        score += 15
+        score += 20
     if result["contacts"]:
         score += 15
     if result["description"]:
         score += 5
     if result["ai_insights"]:
-        score += 10
+        score += 5
     result["lead_score"] = min(score, 100)
     
     # Generate recommendations
@@ -326,8 +441,11 @@ def deep_research_company(company_name, serp_api_key=None, openai_api_key=None):
         recs.append("🔧 Website is DOWN - Emergency IT support required")
     if not result["email"]:
         recs.append("📧 No business email found - Setup Google Workspace/Microsoft 365")
+        recs.append("🔍 Try crawling website again - Add option to deep crawl")
     if not result["contacts"]:
         recs.append("👤 Find decision maker - LinkedIn search recommended")
+    if result.get("linkedin_url"):
+        recs.append(f"🔗 [View LinkedIn Profile]({result['linkedin_url']}) - Search for decision makers")
     if result["phone"]:
         recs.append(f"📞 Call {result['phone']} - Ask for IT decision maker")
     if len(recs) < 3:
@@ -366,7 +484,10 @@ def send_email(to_email, subject, body):
         return False, str(e)
 
 def generate_proposal_email(company_data, contact_person=None):
-    """Generate personalized proposal email"""
+    """Generate personalized proposal email with audit link and QR code"""
+    
+    # Audit link
+    audit_link = "https://techwokx.online/#audit"
     
     if contact_person and contact_person.get('name'):
         salutation = f"Dear {contact_person['name']}"
@@ -383,6 +504,10 @@ def generate_proposal_email(company_data, contact_person=None):
             .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
             .header {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 20px; text-align: center; }}
             .score {{ font-size: 2rem; font-weight: bold; color: #667eea; text-align: center; }}
+            .audit-box {{ background: #f0fdf4; border: 2px solid #22c55e; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0; }}
+            .qr-code {{ text-align: center; margin: 15px 0; }}
+            .button {{ background: #22c55e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; }}
+            .followup-note {{ background: #fef3c7; padding: 10px; border-radius: 8px; margin-top: 20px; font-size: 12px; }}
         </style>
     </head>
     <body>
@@ -393,7 +518,7 @@ def generate_proposal_email(company_data, contact_person=None):
             <div class="content">
                 {salutation},<br><br>
                 
-                <p>I recently reviewed <strong>{company_data['name']}</strong>'s online presence and identified opportunities to improve your IT infrastructure.</p>
+                <p>I recently reviewed <strong>{company_data['name']}</strong>'s online presence and identified opportunities to improve your IT infrastructure and email security.</p>
                 
                 <div class="score">
                     Lead Score: {company_data['lead_score']}/100
@@ -406,17 +531,33 @@ def generate_proposal_email(company_data, contact_person=None):
                     <li><strong>Contact Info:</strong> {'Complete' if company_data.get('phone') else 'Missing'}</li>
                 </ul>
                 
+                <div class="audit-box">
+                    <h3>📋 Free Email Security Audit</h3>
+                    <p>Click below or scan the QR code to run your free email risk assessment:</p>
+                    <div class="qr-code">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={audit_link}" alt="QR Code" width="150">
+                    </div>
+                    <a href="{audit_link}" class="button">🚀 Run Free Audit →</a>
+                    <p style="font-size: 12px; margin-top: 10px;">or visit: {audit_link}</p>
+                </div>
+                
                 <h3>🚀 Recommended Services:</h3>
                 <ul>
                     {''.join([f'<li>{rec}</li>' for rec in company_data.get('recommendations', [])[:3]])}
                 </ul>
                 
-                <p>I'll follow up in a few days to discuss further.</p>
+                <div class="followup-note">
+                    <strong>📅 Next Steps:</strong><br>
+                    • I'll follow up in 3 days if I don't hear back<br>
+                    • Reply to this email or call +233 555 087 407<br>
+                    • Book a free consultation: <a href="https://calendly.com/techwokx">Schedule Here</a>
+                </div>
                 
                 <p>Best regards,<br>
                 <strong>George Jabley</strong><br>
+                Founder & IT Operations Lead<br>
                 TechWokx Ghana<br>
-                <a href="https://techwokx.online">techwokx.online</a>
+                <a href="https://techwokx.online">techwokx.online</a> | +233 555 087 407
                 </p>
             </div>
         </div>
@@ -446,6 +587,8 @@ st.markdown("""
 .status-hot { background: #dc2626; color: white; }
 .status-warm { background: #f97316; color: white; }
 .status-cold { background: #64748b; color: white; }
+.notification-success { background: #d1fae5; border-left: 4px solid #10b981; padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+.notification-warning { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; border-radius: 8px; margin-bottom: 16px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -495,14 +638,11 @@ with st.sidebar:
         ("🔍 Company Research", "company_research"),
         ("👥 Lead CRM", "crm"),
         ("---", "divider1"),
-        ("🤖 FREELANCE", "header2"),
-        ("🎯 Find Jobs", "find_jobs"),
-        ("📋 My Bids", "bid_history"),
-        ("---", "divider2"),
-        ("📧 EMAIL", "header3"),
+        ("📧 COMMUNICATIONS", "header2"),
         ("📤 Send Email", "send_email"),
         ("📊 Email Log", "email_log"),
-        ("---", "divider3"),
+        ("🔄 Follow-ups", "followups"),
+        ("---", "divider2"),
         ("⚙️ Settings", "settings"),
         ("🚪 Logout", "logout")
     ]
@@ -510,7 +650,7 @@ with st.sidebar:
     for label, key in nav_items:
         if label == "---":
             st.markdown("---")
-        elif label.startswith("📋") or label.startswith("🤖") or label.startswith("📧"):
+        elif label.startswith("📋") or label.startswith("📧"):
             st.markdown("<small style='color:#94a3b8'>" + label + "</small>", unsafe_allow_html=True)
         elif st.button(label, key=key, use_container_width=True):
             if key == "logout":
@@ -525,11 +665,23 @@ with st.sidebar:
     api_keys = get_api_keys()
     st.markdown(f"🔍 SERP: {'✅' if api_keys['serp_api'] else '❌'}")
     st.markdown(f"🧠 AI: {'✅' if api_keys['openai'] else '❌'}")
-    st.markdown(f"📧 SMTP: ✅ Configured")
+    st.markdown(f"📧 SMTP: ✅")
     st.markdown(f"📊 Leads: {len(st.session_state.leads)}")
+    
+    # Follow-up reminder
+    needs_followup = get_leads_needing_followup()
+    if needs_followup:
+        st.markdown(f"⚠️ {len(needs_followup)} leads need follow-up")
 
 # ============ DASHBOARD ============
 if st.session_state.page == 'dashboard':
+    # Show notification if exists
+    if st.session_state.notification:
+        notif = st.session_state.notification
+        notif_class = "notification-success" if notif["type"] == "success" else "notification-warning"
+        st.markdown(f"<div class='{notif_class}'>{notif['message']}</div>", unsafe_allow_html=True)
+        st.session_state.notification = None
+    
     st.markdown("""
     <div class="welcome-card">
         <h2>🤖 TechWokx Enterprise Suite</h2>
@@ -537,16 +689,20 @@ if st.session_state.page == 'dashboard':
     </div>
     """, unsafe_allow_html=True)
     
+    total_leads = len(st.session_state.leads)
+    hot_leads = sum(1 for l in st.session_state.leads if l.get("lead_score", 0) >= 70)
+    emails_sent = len(st.session_state.email_log)
+    need_followup = len(get_leads_needing_followup())
+    
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{len(st.session_state.leads)}</div><div class='metric-label'>Total Leads</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{total_leads}</div><div class='metric-label'>Total Leads</div></div>", unsafe_allow_html=True)
     with col2:
-        hot = sum(1 for l in st.session_state.leads if l.get("lead_score", 0) >= 70)
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{hot}</div><div class='metric-label'>Hot Leads</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{hot_leads}</div><div class='metric-label'>Hot Leads</div></div>", unsafe_allow_html=True)
     with col3:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{len(st.session_state.email_log)}</div><div class='metric-label'>Emails Sent</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{emails_sent}</div><div class='metric-label'>Emails Sent</div></div>", unsafe_allow_html=True)
     with col4:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>✅</div><div class='metric-label'>Ready</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{need_followup}</div><div class='metric-label'>Need Follow-up</div></div>", unsafe_allow_html=True)
     
     st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
     
@@ -556,7 +712,8 @@ if st.session_state.page == 'dashboard':
         if st.session_state.leads:
             for lead in st.session_state.leads[-5:]:
                 status_class = "status-hot" if lead.get("lead_score", 0) >= 70 else "status-warm" if lead.get("lead_score", 0) >= 50 else "status-cold"
-                st.markdown(f"<div class='data-card'><strong>{lead['name']}</strong> - Score: {lead['lead_score']}/100 <span class='status-badge {status_class}'>{lead['status']}</span><br><small>{lead['created_at'][:10]}</small></div>", unsafe_allow_html=True)
+                email_status = "📧 Sent" if lead.get('email_sent') else "📧 Pending"
+                st.markdown(f"<div class='data-card'><strong>{lead['name']}</strong> - Score: {lead['lead_score']}/100 <span class='status-badge {status_class}'>{lead['status']}</span><br><small>{email_status} | Added: {lead['created_at'][:10]}</small></div>", unsafe_allow_html=True)
         else:
             st.info("No leads yet. Research companies to get started.")
     
@@ -575,7 +732,7 @@ if st.session_state.page == 'dashboard':
 # ============ COMPANY RESEARCH PAGE ============
 elif st.session_state.page == 'company_research':
     st.markdown('<div class="section-header">🔍 Deep Company Research</div>', unsafe_allow_html=True)
-    st.caption("Powered by Google Search (SERP API) - Finds real company data")
+    st.caption("Powered by Google Search (SERP API) - Finds real company data with deep website crawling")
     st.markdown("---")
     
     api_keys = get_api_keys()
@@ -584,11 +741,11 @@ elif st.session_state.page == 'company_research':
         st.warning("⚠️ SERP API key missing. Add to .streamlit/secrets.toml")
         st.info("Get your key from https://serpapi.com/")
     
-    company_name = st.text_input("Company Name", placeholder="e.g. Courmack Ghana, MTN Ghana, OMA Group")
+    company_name = st.text_input("Company Name", placeholder="e.g. Prime Meridian Docks, MTN Ghana")
     
     if st.button("🔍 Deep Research", type="primary"):
         if company_name:
-            with st.spinner(f"Researching {company_name} using Google Search..."):
+            with st.spinner(f"Researching {company_name} using Google Search and website crawling..."):
                 result = deep_research_company(
                     company_name, 
                     serp_api_key=api_keys["serp_api"],
@@ -606,10 +763,22 @@ elif st.session_state.page == 'company_research':
                         <tr><th>Website</th><td>{result['website'] or 'Not found'}</td></tr>
                         <tr><th>Address</th><td>{result['address'] or 'Not found'}</td></tr>
                         <tr><th>Phone</th><td>{result['phone'] or 'Not found'}</td></tr>
-                        <tr><th>Email</th><td>{result['email'] or 'Not found'}</td></tr>
+                        <tr><th>Email</th><td>{result['email'] or 'Not found'} <button onclick="crawlAgain()">🔄 Deep Crawl</button></td></tr>
                     </table>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # Deep crawl button
+                if result['website'] and not result['email']:
+                    if st.button("🔄 Deep Crawl Website for Email"):
+                        with st.spinner(f"Deep crawling {result['website']}..."):
+                            email_data = crawl_website_for_emails(result['website'])
+                            if email_data and email_data.get('primary_email'):
+                                result['email'] = email_data['primary_email']
+                                st.success(f"✅ Found email: {result['email']}")
+                                st.rerun()
+                            else:
+                                st.warning("No email found after deep crawl")
                 
                 # Contacts Found
                 if result['contacts']:
@@ -622,6 +791,24 @@ elif st.session_state.page == 'company_research':
                             Source: {contact.get('source', 'Website')}
                         </div>
                         """, unsafe_allow_html=True)
+                
+                # LinkedIn Search
+                if result.get('linkedin_url'):
+                    st.markdown(f"""
+                    <div class="data-card">
+                        <h4>🔗 LinkedIn Profile</h4>
+                        <a href="{result['linkedin_url']}" target="_blank">View LinkedIn Profile →</a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    # Create LinkedIn search link
+                    linkedin_search = f"https://www.linkedin.com/search/results/companies/?keywords={result['name'].replace(' ', '%20')}"
+                    st.markdown(f"""
+                    <div class="data-card">
+                        <h4>🔗 LinkedIn Search</h4>
+                        <a href="{linkedin_search}" target="_blank">Search LinkedIn for {result['name']} →</a>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 # Description
                 if result['description']:
@@ -681,11 +868,10 @@ elif st.session_state.page == 'company_research':
                 with col1:
                     if st.button("➕ Add to CRM", use_container_width=True):
                         add_lead(result)
-                        st.success(f"✅ {result['name']} added to CRM!")
                         st.rerun()
                 
                 with col2:
-                    if result.get('email') or result.get('business_emails'):
+                    if result.get('email'):
                         if st.button("📧 Send Proposal Email", use_container_width=True):
                             st.session_state.proposal_lead = result
                             st.session_state.page = 'send_email'
@@ -696,11 +882,23 @@ elif st.session_state.page == 'company_research':
 # ============ LEAD CRM PAGE ============
 elif st.session_state.page == 'crm':
     st.markdown('<div class="section-header">👥 Lead CRM</div>', unsafe_allow_html=True)
-    st.caption("All researched leads and contacts")
+    st.caption("All researched leads with email tracking and follow-up status")
     st.markdown("---")
     
     if st.session_state.leads:
         for lead in st.session_state.leads:
+            email_status = ""
+            if lead.get('email_sent'):
+                email_status = f"📧 Sent on {lead.get('email_sent_date', '')[:10]}"
+                if lead.get('email_opened'):
+                    email_status += " | 👁️ Opened"
+                if lead.get('email_responded'):
+                    email_status += " | 💬 Responded"
+                else:
+                    email_status += f" | ⏰ Follow-up: {lead.get('followup_date', '')[:10] if lead.get('followup_date') else 'N/A'}"
+            else:
+                email_status = "📧 No email sent"
+            
             with st.expander(f"{lead['name']} - Score: {lead['lead_score']}/100 - {lead['status']}"):
                 col1, col2 = st.columns(2)
                 with col1:
@@ -710,19 +908,33 @@ elif st.session_state.page == 'crm':
                 with col2:
                     st.write(f"**Address:** {lead.get('address', 'N/A')}")
                     st.write(f"**Added:** {lead['created_at'][:10]}")
+                    st.write(f"**Email Status:** {email_status}")
                 
                 if lead.get('contacts'):
                     st.write("**Contacts Found:**")
                     for contact in lead['contacts'][:2]:
                         st.write(f"- {contact.get('name', 'Name')} ({contact.get('title', 'Staff')})")
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    if st.button(f"📧 Send Email", key=f"email_{lead['id']}"):
-                        st.session_state.proposal_lead = lead
-                        st.session_state.page = 'send_email'
-                        st.rerun()
+                    if not lead.get('email_sent') and lead.get('email'):
+                        if st.button(f"📧 Send Email", key=f"email_{lead['id']}"):
+                            st.session_state.proposal_lead = lead
+                            st.session_state.page = 'send_email'
+                            st.rerun()
+                    elif lead.get('email_sent') and not lead.get('email_responded'):
+                        if st.button(f"🔄 Send Follow-up", key=f"followup_{lead['id']}"):
+                            st.session_state.proposal_lead = lead
+                            st.session_state.page = 'send_email'
+                            st.rerun()
+                
                 with col2:
+                    if st.button(f"✅ Mark Responded", key=f"responded_{lead['id']}"):
+                        update_lead_email_status(lead['id'], "responded")
+                        st.success("Marked as responded!")
+                        st.rerun()
+                
+                with col3:
                     if st.button(f"🗑️ Delete", key=f"delete_{lead['id']}"):
                         st.session_state.leads = [l for l in st.session_state.leads if l['id'] != lead['id']]
                         save_leads()
@@ -734,7 +946,7 @@ elif st.session_state.page == 'crm':
 # ============ SEND EMAIL PAGE ============
 elif st.session_state.page == 'send_email':
     st.markdown('<div class="section-header">📧 Send Proposal Email</div>', unsafe_allow_html=True)
-    st.caption("Send personalized proposal emails to leads")
+    st.caption("Send personalized proposal emails with audit link and QR code")
     st.markdown("---")
     
     leads = st.session_state.leads
@@ -749,7 +961,6 @@ elif st.session_state.page == 'send_email':
         selected = st.selectbox("Select Lead", list(lead_options.keys()), index=0 if default_lead else None)
         lead = lead_options[selected]
         
-        # Determine recipient email
         recipient_email = lead.get('email') or (lead.get('business_emails', [''])[0] if lead.get('business_emails') else '')
         to_email = st.text_input("To Email", value=recipient_email)
         
@@ -767,13 +978,17 @@ elif st.session_state.page == 'send_email':
                     subject = f"IT Assessment for {lead['name']} - Score: {lead['lead_score']}/100"
                     success, msg = send_email(to_email, subject, email_body)
                     if success:
+                        update_lead_email_status(lead['id'], "sent")
                         st.session_state.email_log.append({
                             "to": to_email,
                             "company": lead['name'],
                             "date": datetime.now().isoformat(),
-                            "status": "Sent"
+                            "status": "Sent",
+                            "followup_date": (datetime.now() + timedelta(days=3)).isoformat()
                         })
+                        save_email_log()
                         st.success(f"✅ Email sent to {to_email}!")
+                        st.info(f"📅 Follow-up scheduled for {(datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d')}")
                     else:
                         st.error(f"❌ Failed: {msg}")
                 else:
@@ -802,10 +1017,46 @@ elif st.session_state.page == 'email_log':
                 <strong>Company:</strong> {log['company']}<br>
                 <strong>Status:</strong> {log['status']}<br>
                 <strong>Date:</strong> {log['date'][:19]}
+                {f"<br><strong>Follow-up:</strong> {log['followup_date'][:10]}" if log.get('followup_date') else ""}
             </div>
             """, unsafe_allow_html=True)
     else:
         st.info("No emails sent yet")
+
+# ============ FOLLOW-UPS PAGE ============
+elif st.session_state.page == 'followups':
+    st.markdown('<div class="section-header">🔄 Follow-up Management</div>', unsafe_allow_html=True)
+    st.caption("Leads that need follow-up attention")
+    st.markdown("---")
+    
+    needs_followup = get_leads_needing_followup()
+    
+    if needs_followup:
+        st.warning(f"⚠️ {len(needs_followup)} leads need follow-up")
+        
+        for lead in needs_followup:
+            with st.expander(f"{lead['name']} - Email sent on {lead.get('email_sent_date', '')[:10]}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Email:** {lead.get('email', 'N/A')}")
+                    st.write(f"**Phone:** {lead.get('phone', 'N/A')}")
+                with col2:
+                    st.write(f"**Follow-up Count:** {lead.get('followup_count', 0)}")
+                    st.write(f"**Status:** {'Opened' if lead.get('email_opened') else 'Not opened'} | {'Responded' if lead.get('email_responded') else 'No response'}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(f"📧 Send Follow-up Email", key=f"followup_email_{lead['id']}"):
+                        st.session_state.proposal_lead = lead
+                        st.session_state.page = 'send_email'
+                        st.rerun()
+                with col2:
+                    if st.button(f"✅ Mark as Responded", key=f"followup_responded_{lead['id']}"):
+                        update_lead_email_status(lead['id'], "responded")
+                        st.success("Marked as responded!")
+                        st.rerun()
+    else:
+        st.success("✅ No leads need follow-up at this time")
 
 # ============ SETTINGS PAGE ============
 elif st.session_state.page == 'settings':
@@ -828,6 +1079,10 @@ elif st.session_state.page == 'settings':
     - SSL: {SMTP_CONFIG['use_ssl']}
     """)
     
+    st.markdown("### Follow-up Settings")
+    followup_days = st.number_input("Days before follow-up", min_value=1, max_value=14, value=3)
+    st.success(f"Follow-up scheduled {followup_days} days after initial email")
+    
     st.markdown("### Data Management")
     col1, col2 = st.columns(2)
     with col1:
@@ -844,15 +1099,6 @@ elif st.session_state.page == 'settings':
                 st.download_button("Download CSV", csv, "leads_export.csv", "text/csv")
             else:
                 st.warning("No leads to export")
-
-# ============ FREELANCE PAGES ============
-elif st.session_state.page == 'find_jobs':
-    st.markdown('<div class="section-header">🎯 Find Freelance Jobs</div>', unsafe_allow_html=True)
-    st.info("Freelance job search feature - Coming soon in v2.0")
-
-elif st.session_state.page == 'bid_history':
-    st.markdown('<div class="section-header">📋 My Bids</div>', unsafe_allow_html=True)
-    st.info("Bid history feature - Coming soon in v2.0")
 
 # ============ FOOTER ============
 st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
