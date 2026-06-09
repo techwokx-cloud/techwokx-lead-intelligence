@@ -1,338 +1,276 @@
-# pages/company_research.py
-import sys
-import os
+# modules/company_research.py
+import requests
+import re
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+import time
 
-# Add parent directory to path FIRST
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Import Streamlit FIRST
-import streamlit as st
-
-# Set page config (must be first Streamlit command)
-st.set_page_config(
-    page_title="Company Research",
-    page_icon="🔍",
-    layout="wide"
-)
-
-# Now import other modules
-from dotenv import load_dotenv
-load_dotenv()
-
-# Try to import theme safely
-try:
-    from modules.theme import THEME_CSS
-    st.markdown(THEME_CSS, unsafe_allow_html=True)
-except Exception:
-    pass
-
-from modules.company_research import research_company
-from modules.lead_scoring import score_from_research
-from modules.technology_detector import detect_technologies
-from modules.crm import save_research_to_crm
-from modules.database import get_session, ResearchHistory
-from datetime import datetime
-
-st.markdown("# 🔍 Company Research")
-st.caption("The intelligence hub — research any company in seconds.")
-st.markdown("---")
-
-col1, col2, col3 = st.columns([2, 2, 1])
-with col1:
-    company_name = st.text_input("Company Name", placeholder="e.g. Nyaho Medical Centre", label_visibility="collapsed")
-with col2:
-    website = st.text_input("Website", placeholder="e.g. nyahoclinic.com", label_visibility="collapsed")
-with col3:
-    run = st.button("🔍 Research", type="primary", use_container_width=True)
-
-if run and (company_name or website):
-    # Create progress bar
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    # Track progress
-    progress_value = 0
-    
-    def update_progress(message):
-        nonlocal progress_value
-        status_text.text(message)
-        # Increment progress slowly
-        if "Searching" in message:
-            progress_value = 0.15
-        elif "Verifying" in message:
-            progress_value = 0.30
-        elif "Crawling" in message:
-            progress_value = 0.50
-        elif "DNS" in message:
-            progress_value = 0.70
-        elif "Calculating" in message or "Analyzing" in message:
-            progress_value = 0.85
-        elif "Saving" in message:
-            progress_value = 0.95
-        else:
-            progress_value = min(progress_value + 0.05, 0.95)
-        progress_bar.progress(progress_value)
+def search_google_serp(api_key, business_name, location="Ghana"):
+    """Search Google SERP for business information"""
+    if not api_key:
+        return None
     
     try:
-        with st.spinner("Researching..."):
-            # Run research with callback
-            result = research_company(
-                company_name=company_name, 
-                website=website, 
-                progress_cb=update_progress
-            )
+        url = "https://serpapi.com/search"
+        params = {
+            "api_key": api_key,
+            "q": f"{business_name} {location}",
+            "location": location,
+            "engine": "google"
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        result = {
+            "name": business_name,
+            "website": None,
+            "description": None,
+            "address": None,
+            "phone": None,
+            "social_links": [],
+            "people_also_search": []
+        }
+        
+        # Get knowledge graph
+        if "knowledge_graph" in data:
+            kg = data["knowledge_graph"]
+            result["name"] = kg.get("title", result["name"])
+            result["website"] = kg.get("website", "")
+            result["description"] = kg.get("description", "")
+            result["address"] = kg.get("address", "")
+            result["phone"] = kg.get("phone", "")
             
-            # Score the lead
-            update_progress("Calculating lead score...")
-            lead = score_from_research(result)
-            
-            # Detect technologies
-            update_progress("Analyzing technologies...")
-            tech = None
+            # Get social profiles
+            if "profile" in kg:
+                for profile in kg.get("profile", []):
+                    if isinstance(profile, dict):
+                        result["social_links"].append(profile.get("link", ""))
+                    elif isinstance(profile, str):
+                        result["social_links"].append(profile)
+        
+        # Get organic results for additional info
+        if "organic_results" in data:
+            for org in data["organic_results"][:3]:
+                if org.get("snippet") and not result["description"]:
+                    result["description"] = org.get("snippet")
+        
+        # Get people also search for
+        if "related_queries" in data:
+            for query in data["related_queries"].get("top", [])[:5]:
+                result["people_also_search"].append(query.get("query"))
+        
+        return result
+    except Exception as e:
+        return None
+
+def find_contact_person(website):
+    """Try to find contact person/management from website"""
+    if not website:
+        return None
+    
+    try:
+        if not website.startswith("http"):
+            website = "https://" + website
+        
+        response = requests.get(website, timeout=10, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Look for management team, about page, team members
+        contacts = []
+        
+        # Find all text
+        text = soup.get_text().lower()
+        
+        # Common job titles to look for
+        titles = ['ceo', 'managing director', 'general manager', 'founder', 
+                  'director', 'head of', 'manager', 'president', 'owner']
+        
+        # Find emails
+        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        emails = re.findall(email_pattern, response.text)
+        business_emails = [e for e in emails if not any(x in e.lower() for x in ['example', 'test', 'noreply'])]
+        
+        # Try to find team/about page link
+        about_links = []
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '').lower()
+            if 'about' in href or 'team' in href or 'management' in href or 'leadership' in href:
+                full_url = urljoin(website, link.get('href'))
+                about_links.append(full_url)
+        
+        # If about page exists, scrape it
+        if about_links:
             try:
-                if result.website:
-                    tech = detect_technologies(result.website)
-            except Exception as tech_error:
-                # Silently ignore tech detection errors
+                about_response = requests.get(about_links[0], timeout=10)
+                about_soup = BeautifulSoup(about_response.text, 'html.parser')
+                about_text = about_soup.get_text().lower()
+                
+                # Look for names with titles
+                for title in titles:
+                    pattern = rf'([A-Z][a-z]+ [A-Z][a-z]+).*?{title}'
+                    matches = re.findall(pattern, about_response.text, re.IGNORECASE)
+                    for match in matches[:3]:
+                        contacts.append({"name": match, "title": title.upper(), "source": "About Page"})
+            except:
                 pass
-            
-            # Save to database
-            update_progress("Saving to database...")
-            db = get_session()
-            try:
-                history = ResearchHistory(
-                    company_name=result.company_name,
-                    website=result.website or "",
-                    searched_at=datetime.utcnow(),
-                    result_summary=f"{lead.total}/100 {lead.status}"
-                )
-                db.add(history)
-                db.commit()
-            except Exception as db_error:
-                st.warning(f"Could not save to database: {db_error}")
-            finally:
-                db.close()
-            
-            # Save to CRM
-            try:
-                cid = save_research_to_crm(result, result.dns_result, result.website_result, lead)
-                st.session_state["last_company_id"] = cid
-            except Exception as crm_error:
-                st.warning(f"Could not save to CRM: {crm_error}")
-            
-            # Store in session
-            st.session_state["last_research"] = result
-            st.session_state["last_lead_score"] = lead
-            st.session_state["last_tech"] = tech
-            
-            # Complete
-            progress_bar.progress(1.0)
-            status_text.text("Complete!")
-            
-            st.success(f"✅ **{result.company_name}** — Lead Score: **{lead.total}/100 ({lead.status})**")
-            
-    except Exception as research_error:
-        st.error(f"Research failed: {str(research_error)}")
-        import traceback
-        with st.expander("Show error details"):
-            st.code(traceback.format_exc())
-        st.stop()
+        
+        # Look for email signatures
+        for email in business_emails[:3]:
+            contacts.append({"email": email, "title": "Contact Email", "source": "Website"})
+        
+        return {
+            "contacts": contacts[:5],
+            "business_emails": business_emails[:3],
+            "about_page": about_links[0] if about_links else None
+        }
+    except Exception as e:
+        return None
 
-# Display results if available
-if "last_research" in st.session_state:
-    result = st.session_state["last_research"]
-    lead = st.session_state["last_lead_score"]
-    tech = st.session_state.get("last_tech")
-    dns = result.dns_result
-    web = result.website_result
-    crawl = result.crawl_result
+def check_website_status(url):
+    """Check if website is accessible"""
+    if not url:
+        return {"reachable": False, "error": "No website"}
     
-    st.markdown("<br>", unsafe_allow_html=True)
-    hc1, hc2, hc3 = st.columns([3, 1, 1])
-    with hc1:
-        st.markdown(f"## {result.company_name}")
-        st.caption(f"🌐 {result.website or '—'}  |  📞 {result.phone or '—'}  |  ✉️ {result.email or '—'}")
-    with hc2:
-        score_cls = "score-hot" if lead.total >= 90 else "score-warm" if lead.total >= 70 else "score-good"
-        st.markdown(f"""<div style="text-align:center">
-            <div class="score-ring {score_cls}" style="margin:auto;font-size:1.5rem">{lead.total}<br><span style="font-size:0.6rem">/100</span></div>
-            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.4rem">Lead Score</div>
-        </div>""", unsafe_allow_html=True)
-    with hc3:
-        conf_cls = "score-good" if result.confidence_score >= 80 else "score-warm" if result.confidence_score >= 60 else "score-hot"
-        st.markdown(f"""<div style="text-align:center">
-            <div class="score-ring {conf_cls}" style="margin:auto;font-size:1.5rem">{int(result.confidence_score)}<br><span style="font-size:0.6rem">%</span></div>
-            <div style="font-size:0.72rem;color:#94a3b8;margin-top:0.4rem">Confidence</div>
-        </div>""", unsafe_allow_html=True)
-    
-    st.markdown("---")
-    tab_ov, tab_con, tab_tech, tab_audit, tab_opp = st.tabs(["📋 Overview", "👤 Contacts", "💻 Technology", "🛡️ Audit", "💰 Opportunities"])
-    
-    with tab_ov:
-        l, r = st.columns(2)
-        with l:
-            st.markdown('<div class="data-card"><h4>Company Profile</h4>', unsafe_allow_html=True)
-            for label, val in [
-                ("Company", result.company_name),
-                ("Website", result.website or "—"),
-                ("Phone", result.phone or "—"),
-                ("Email", result.email or "—"),
-                ("Address", result.address or "—"),
-                ("Confidence", f"{result.confidence_score:.0f}% — {result.confidence_label}"),
-                ("Sources", ", ".join(result.sources) if result.sources else "—")
-            ]:
-                st.markdown(f'<div class="profile-row"><span class="profile-label">{label}</span><span class="profile-value">{val}</span></div>', unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-        with r:
-            if result.description:
-                st.markdown(f'<div class="data-card"><h4>About</h4><p style="color:#e2e8f0">{result.description[:400]}</p></div>', unsafe_allow_html=True)
-            st.markdown('<div class="data-card"><h4>Website Status</h4>', unsafe_allow_html=True)
-            if web:
-                ssl_valid = False
-                if web.ssl and hasattr(web.ssl, 'valid'):
-                    ssl_valid = web.ssl.valid
-                for l2, v2 in [
-                    ("Reachable", "✅ Yes" if web.reachable else "❌ No"),
-                    ("HTTPS", "✅ Yes" if web.https else "❌ No"),
-                    ("SSL Valid", "✅ Yes" if ssl_valid else "❌ No"),
-                    ("Response", f"{web.response_time_ms}ms" if web.response_time_ms else "—"),
-                    ("Title", (web.title or "—")[:50])
-                ]:
-                    st.markdown(f'<div class="profile-row"><span class="profile-label">{l2}</span><span class="profile-value">{v2}</span></div>', unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-    
-    with tab_con:
-        if crawl and (crawl.emails or crawl.phones or crawl.social_links):
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown('<div class="data-card"><h4>Emails Found</h4>', unsafe_allow_html=True)
-                for e in (crawl.emails or []):
-                    st.code(e)
-                if not crawl.emails:
-                    st.caption("None found")
-                st.markdown("</div>", unsafe_allow_html=True)
-                st.markdown('<div class="data-card"><h4>Phone Numbers</h4>', unsafe_allow_html=True)
-                for p in (crawl.phones or [])[:5]:
-                    st.code(p)
-                if not crawl.phones:
-                    st.caption("None found")
-                st.markdown("</div>", unsafe_allow_html=True)
-            with c2:
-                st.markdown('<div class="data-card"><h4>Social Profiles</h4>', unsafe_allow_html=True)
-                for platform, url in (crawl.social_links or {}).items():
-                    st.markdown(f"[{platform.title()}]({url})")
-                if not crawl.social_links:
-                    st.caption("None found")
-                st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="empty-state"><div class="empty-state-icon">👤</div><div class="empty-state-title">No contact data extracted</div><div class="empty-state-sub">Website may not be crawlable</div></div>', unsafe_allow_html=True)
-    
-    with tab_tech:
-        if tech and hasattr(tech, 'detected') and tech.detected:
-            st.markdown('<div class="data-card"><h4>Detected Technologies</h4>', unsafe_allow_html=True)
-            st.markdown("".join(f'<span class="tech-chip">✦ {t}</span>' for t in tech.detected), unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-            if hasattr(tech, 'categories') and tech.categories:
-                cats = list(tech.categories.items())
-                cols = st.columns(min(len(cats), 4))
-                for col, (cat, items) in zip(cols, cats):
-                    with col:
-                        st.markdown(f'<div class="data-card"><h4>{cat}</h4>', unsafe_allow_html=True)
-                        for i in items:
-                            st.markdown(f"• {i}")
-                        st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="empty-state"><div class="empty-state-icon">💻</div><div class="empty-state-title">No technologies detected</div><div class="empty-state-sub">Run research on a live website</div></div>', unsafe_allow_html=True)
-    
-    with tab_audit:
-        if dns:
-            s1, s2, s3 = st.columns(3)
-            ssl_score = 0
-            if web and web.ssl and hasattr(web.ssl, 'valid') and web.ssl.valid:
-                ssl_score = 100
-            audit_items = [
-                ("Email Security", dns.score, "#22c55e" if dns.score >= 75 else "#f97316" if dns.score >= 50 else "#ef4444", dns.grade),
-                ("SSL / HTTPS", ssl_score, "#22c55e" if ssl_score else "#ef4444", "A" if ssl_score else "F"),
-                ("Lead Opportunity", lead.total, "#ef4444" if lead.total >= 90 else "#f97316" if lead.total >= 70 else "#22c55e", "Hot" if lead.total >= 90 else "Warm" if lead.total >= 70 else "Cold"),
-            ]
-            for col, (title, score, color, grade) in zip([s1, s2, s3], audit_items):
-                with col:
-                    st.markdown(f'''<div class="scorecard">
-                        <div class="scorecard-title">{title}</div>
-                        <div class="scorecard-score" style="color:{color}">{score}</div>
-                        <div class="scorecard-grade">Grade: {grade}</div>
-                    </div>''', unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
-            for f in dns.findings:
-                status = getattr(f, 'status', 'WARNING')
-                check = getattr(f, 'check', 'Unknown')
-                detail = getattr(f, 'detail', 'No details')
-                if status == "PASS":
-                    st.success(f"✅ **{check}** — {detail}")
-                elif status == "FAIL":
-                    st.error(f"❌ **{check}** — {detail}")
-                else:
-                    st.warning(f"⚠️ **{check}** — {detail}")
-        else:
-            st.info("DNS audit not available.")
-    
-    with tab_opp:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown('<div class="data-card"><h4>Score Breakdown</h4>', unsafe_allow_html=True)
-            triggered = [r for r in lead.rules if r.triggered]
-            for r in triggered:
-                st.markdown(f'<div class="profile-row"><span class="profile-label" style="color:#fb923c">+{r.points}</span><span class="profile-value">{r.reason}</span></div>', unsafe_allow_html=True)
-            if not triggered:
-                st.caption("No critical issues")
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown(f'<div class="data-card"><h4>Opportunity Summary</h4><p style="color:#e2e8f0;font-size:0.85rem">{lead.opportunity_summary}</p></div>', unsafe_allow_html=True)
-        with c2:
-            st.markdown('<div class="data-card"><h4>Recommended Services</h4>', unsafe_allow_html=True)
-            actions = []
-            if dns and hasattr(dns, 'has_dmarc') and not dns.has_dmarc:
-                actions.append(("📧", "Fix email security", "Business Email Fix"))
-            if web and web.ssl and hasattr(web.ssl, 'valid') and not web.ssl.valid:
-                actions.append(("🔒", "Fix SSL certificate", "Website Security"))
-            if not result.email:
-                actions.append(("📬", "Setup professional email", "Email Setup"))
-            actions.append(("📊", "Full infrastructure audit", "IT Audit"))
-            for icon, action, svc in actions:
-                st.markdown(f'<div class="profile-row"><span class="profile-label">{icon}</span><span class="profile-value">{action} <span class="badge badge-info">{svc}</span></span></div>', unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-    
-    st.markdown("---")
-    a1, a2, a3, a4 = st.columns(4)
-    with a1:
-        if st.button("🧠 AI Analysis", use_container_width=True):
-            try:
-                st.switch_page("pages/Lead_Intelligence.py")
-            except:
-                st.info("Please navigate to Lead Intelligence from sidebar")
-    with a2:
-        if st.button("📄 Proposal", use_container_width=True):
-            try:
-                st.switch_page("pages/Proposal_Generator.py")
-            except:
-                st.info("Please navigate to Proposal Generator from sidebar")
-    with a3:
-        if st.button("👥 CRM", use_container_width=True):
-            try:
-                st.switch_page("pages/CRM.py")
-            except:
-                st.info("Please navigate to CRM from sidebar")
-    with a4:
-        if st.button("🔄 New Search", use_container_width=True):
-            for k in ["last_research", "last_lead_score", "last_tech", "last_company_id"]:
-                st.session_state.pop(k, None)
-            st.rerun()
+    try:
+        if not url.startswith("http"):
+            url = "https://" + url
+        
+        response = requests.get(url, timeout=10, verify=True)
+        return {
+            "reachable": response.status_code == 200,
+            "status_code": response.status_code,
+            "response_time": response.elapsed.total_seconds() * 1000,
+            "error": None if response.status_code == 200 else f"HTTP {response.status_code}"
+        }
+    except Exception as e:
+        return {"reachable": False, "error": str(e)[:50]}
 
-else:
-    # Empty state
-    st.markdown("""
-        <div class="empty-state" style="margin-top:5rem">
-            <div class="empty-state-icon">🔍</div>
-            <div class="empty-state-title">Search for a company to begin</div>
-            <div class="empty-state-sub">Enter a company name or website above and click Research</div>
-        </div>
-    """, unsafe_allow_html=True)
+def analyze_with_ai(api_key, company_data):
+    """Analyze company using OpenAI"""
+    if not api_key:
+        return None
+    
+    try:
+        prompt = f"""Analyze this company and provide actionable insights:
+
+Company: {company_data.get('name')}
+Website: {company_data.get('website', 'N/A')}
+Industry: {company_data.get('industry', 'Unknown')}
+
+Provide a brief analysis (max 150 words):
+1. What IT/email security services they likely need
+2. Suggested initial outreach approach
+3. Estimated budget range for services"""
+
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 300,
+            "temperature": 0.7
+        }
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        return None
+    except Exception as e:
+        return None
+
+def deep_research_company(company_name, serp_api_key=None, openai_api_key=None):
+    """Perform deep research using Google Search (SERP API)"""
+    
+    result = {
+        "name": company_name,
+        "website": None,
+        "email": None,
+        "phone": None,
+        "address": None,
+        "description": None,
+        "social_links": [],
+        "contacts": [],
+        "business_emails": [],
+        "website_status": None,
+        "ai_insights": None,
+        "people_also_search": [],
+        "lead_score": 0,
+        "recommendations": [],
+        "sources": []
+    }
+    
+    # Step 1: Google Search via SERP API
+    if serp_api_key:
+        serp_data = search_google_serp(serp_api_key, company_name)
+        if serp_data:
+            result["name"] = serp_data.get("name", result["name"])
+            result["website"] = serp_data.get("website")
+            result["address"] = serp_data.get("address")
+            result["phone"] = serp_data.get("phone")
+            result["description"] = serp_data.get("description")
+            result["social_links"] = serp_data.get("social_links", [])
+            result["people_also_search"] = serp_data.get("people_also_search", [])
+            result["sources"].append("Google Search")
+    
+    # Step 2: Check website status
+    if result["website"]:
+        result["website_status"] = check_website_status(result["website"])
+        
+        # Step 3: Find contact person from website
+        contact_data = find_contact_person(result["website"])
+        if contact_data:
+            result["contacts"] = contact_data.get("contacts", [])
+            result["business_emails"] = contact_data.get("business_emails", [])
+            if result["business_emails"]:
+                result["email"] = result["business_emails"][0]
+                result["sources"].append("Website Scraping")
+    
+    # Step 4: AI Analysis
+    if openai_api_key:
+        ai_insights = analyze_with_ai(openai_api_key, result)
+        if ai_insights:
+            result["ai_insights"] = ai_insights
+            result["sources"].append("AI Analysis")
+    
+    # Calculate lead score
+    score = 0
+    if result["website"]:
+        score += 20
+        if result["website_status"] and result["website_status"]["reachable"]:
+            score += 15
+    if result["address"]:
+        score += 10
+    if result["phone"]:
+        score += 10
+    if result["email"]:
+        score += 15
+    if result["contacts"]:
+        score += 15
+    if result["description"]:
+        score += 5
+    if result["social_links"]:
+        score += 5
+    if result["ai_insights"]:
+        score += 5
+    result["lead_score"] = min(score, 100)
+    
+    # Generate recommendations
+    recs = []
+    if not result["website"]:
+        recs.append("🌐 No website found - Professional website needed")
+    elif result["website_status"] and not result["website_status"]["reachable"]:
+        recs.append("🔧 Website is DOWN - Emergency IT support required")
+    if not result["email"]:
+        recs.append("📧 No business email found - Setup Google Workspace/Microsoft 365")
+    if not result["contacts"]:
+        recs.append("👤 Find decision maker - LinkedIn search recommended")
+    if result["phone"]:
+        recs.append(f"📞 Call {result['phone']} - Ask for IT decision maker")
+    if len(recs) < 3:
+        recs.append("📊 Schedule free IT consultation")
+    result["recommendations"] = recs[:5]
+    
+    return result
