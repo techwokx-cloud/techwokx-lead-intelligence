@@ -9,7 +9,7 @@ import re
 # Page config
 st.set_page_config(
     page_title="TechWokx Enterprise Suite",
-    page_icon="🔍",
+    page_icon=":mag:",
     layout="wide"
 )
 
@@ -31,18 +31,15 @@ if 'notification' not in st.session_state:
 LEADS_FILE = "data/leads.json"
 
 def load_leads_from_file():
-    """Load leads from JSON file"""
     try:
         if os.path.exists(LEADS_FILE):
             with open(LEADS_FILE, 'r', encoding='utf-8') as f:
-                leads = json.load(f)
-                return leads
+                return json.load(f)
     except Exception as e:
         print(f"Error loading leads: {e}")
     return []
 
 def save_leads_to_file(leads):
-    """Save leads to JSON file"""
     try:
         os.makedirs("data", exist_ok=True)
         with open(LEADS_FILE, 'w', encoding='utf-8') as f:
@@ -66,11 +63,9 @@ USERS = {
 
 # ============ LEAD FUNCTIONS ============
 def add_lead(lead_data):
-    """Add a new lead to CRM"""
-    # Check for duplicate
     for lead in st.session_state.leads:
         if lead.get('name', '').lower() == lead_data.get('name', '').lower():
-            st.session_state.notification = {"type": "warning", "message": f"Lead '{lead_data.get('name')}' already exists!"}
+            st.session_state.notification = {"type": "warning", "message": "Lead already exists!"}
             return False
     
     new_lead = {
@@ -94,28 +89,17 @@ def add_lead(lead_data):
     
     st.session_state.leads.append(new_lead)
     save_leads_to_file(st.session_state.leads)
-    st.session_state.notification = {"type": "success", "message": f"Lead '{lead_data.get('name')}' added successfully!"}
+    st.session_state.notification = {"type": "success", "message": f"Added: {lead_data.get('name')}"}
     return True
 
 def delete_lead(lead_id):
-    """Delete a lead from CRM"""
     st.session_state.leads = [l for l in st.session_state.leads if l['id'] != lead_id]
     save_leads_to_file(st.session_state.leads)
-    st.session_state.notification = {"type": "success", "message": "Lead deleted successfully!"}
+    st.session_state.notification = {"type": "success", "message": "Lead deleted"}
     return True
 
-def update_lead(lead_id, updates):
-    """Update lead information"""
-    for lead in st.session_state.leads:
-        if lead['id'] == lead_id:
-            lead.update(updates)
-            save_leads_to_file(st.session_state.leads)
-            return True
-    return False
-
-# ============ COMPANY RESEARCH FUNCTION ============
+# ============ COMPANY RESEARCH ============
 def research_company(company_name):
-    """Simulate company research"""
     return {
         "name": company_name,
         "website": f"www.{company_name.lower().replace(' ', '')}.com",
@@ -128,9 +112,6 @@ def research_company(company_name):
             "Setup professional email (Google Workspace/Microsoft 365)",
             "Conduct IT security audit",
             "Schedule free consultation call"
-        ],
-        "contacts": [
-            {"name": "Management Team", "title": "Decision Makers", "source": "LinkedIn"}
         ]
     }
 
@@ -203,37 +184,43 @@ def export_json():
     return json.dumps(st.session_state.leads, indent=2, default=str)
 
 # ============ CSS ============
-st.markdown("""
-<style>
-.stApp { background: #f8fafc; }
-[data-testid="stSidebar"] { background: #0f172a; }
-[data-testid="stSidebar"] .stMarkdown, [data-testid="stSidebar"] p { color: #e2e8f0; }
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { color: #fbbf24; }
-[data-testid="stSidebar"] .stButton button { background: rgba(251, 191, 36, 0.15); color: #fbbf24; width: 100%; margin: 2px 0; }
-.welcome-card { background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; color: white; }
-.metric-card { background: white; border-radius: 12px; padding: 1rem; border: 1px solid #e2e8f0; text-align: center; }
-.metric-value { font-size: 1.8rem; font-weight: 700; color: #0f172a; }
-.metric-label { color: #64748b; font-size: 0.8rem; }
-.data-card { background: white; border-radius: 12px; padding: 1.2rem; border: 1px solid #e2e8f0; margin-bottom: 1rem; }
-.section-header { color: #0f172a; font-size: 1.2rem; font-weight: 600; border-left: 3px solid #667eea; padding-left: 1rem; margin: 1.5rem 0 1rem 0; }
-.custom-divider { height: 1px; background: #e2e8f0; margin: 1.5rem 0; }
-.stButton > button { background: linear-gradient(135deg, #667eea, #764ba2); color: white; font-weight: 600; border: none; border-radius: 8px; }
-.notification-success { background: #d1fae5; border-left: 4px solid #10b981; padding: 12px; border-radius: 8px; margin-bottom: 16px; }
-.notification-warning { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; border-radius: 8px; margin-bottom: 16px; }
-.status-hot { background: #dc2626; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
-.status-warm { background: #f97316; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
-.status-cold { background: #64748b; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
-</style>
-""", unsafe_allow_html=True)
+st.markdown(
+    """
+    <style>
+    .stApp { background: #f8fafc; }
+    [data-testid="stSidebar"] { background: #0f172a; }
+    [data-testid="stSidebar"] .stMarkdown, [data-testid="stSidebar"] p { color: #e2e8f0; }
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { color: #fbbf24; }
+    [data-testid="stSidebar"] .stButton button { background: rgba(251, 191, 36, 0.15); color: #fbbf24; width: 100%; margin: 2px 0; }
+    .welcome-card { background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; color: white; }
+    .metric-card { background: white; border-radius: 12px; padding: 1rem; border: 1px solid #e2e8f0; text-align: center; }
+    .metric-value { font-size: 1.8rem; font-weight: 700; color: #0f172a; }
+    .metric-label { color: #64748b; font-size: 0.8rem; }
+    .data-card { background: white; border-radius: 12px; padding: 1.2rem; border: 1px solid #e2e8f0; margin-bottom: 1rem; }
+    .section-header { color: #0f172a; font-size: 1.2rem; font-weight: 600; border-left: 3px solid #667eea; padding-left: 1rem; margin: 1.5rem 0 1rem 0; }
+    .custom-divider { height: 1px; background: #e2e8f0; margin: 1.5rem 0; }
+    .stButton > button { background: linear-gradient(135deg, #667eea, #764ba2); color: white; font-weight: 600; border: none; border-radius: 8px; }
+    .notification-success { background: #d1fae5; border-left: 4px solid #10b981; padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+    .notification-warning { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+    .status-hot { background: #dc2626; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+    .status-warm { background: #f97316; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+    .status-cold { background: #64748b; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # ============ LOGIN PAGE ============
 if not st.session_state.authenticated:
-    st.markdown("""
-    <div style="max-width: 400px; margin: 100px auto; padding: 2rem; background: white; border-radius: 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); text-align: center;">
-        <h1 style="color: #667eea;">TechWokx</h1>
-        <p>Enterprise Suite</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div style="max-width: 400px; margin: 100px auto; padding: 2rem; background: white; border-radius: 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); text-align: center;">
+            <h1 style="color: #667eea;">TechWokx</h1>
+            <p>Enterprise Suite</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     
     with st.form("login"):
         email = st.text_input("Email", placeholder="hello@techwokx.online")
@@ -280,19 +267,21 @@ with st.sidebar:
 
 # ============ DASHBOARD ============
 if st.session_state.current_page == 'dashboard':
-    # Show notification
     if st.session_state.notification:
         notif = st.session_state.notification
         notif_class = "notification-success" if notif["type"] == "success" else "notification-warning"
         st.markdown(f"<div class='{notif_class}'>{notif['message']}</div>", unsafe_allow_html=True)
         st.session_state.notification = None
     
-    st.markdown("""
-    <div class="welcome-card">
-        <h2>Welcome to TechWokx Enterprise Suite</h2>
-        <p>Lead Intelligence | Company Research | Email Automation</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="welcome-card">
+            <h2>Welcome to TechWokx Enterprise Suite</h2>
+            <p>Lead Intelligence | Company Research | Email Automation</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     
     total = len(st.session_state.leads)
     hot = sum(1 for l in st.session_state.leads if l.get("lead_score", 0) >= 70)
@@ -317,7 +306,10 @@ if st.session_state.current_page == 'dashboard':
         if st.session_state.leads:
             for lead in st.session_state.leads[-5:]:
                 status_class = "status-hot" if lead.get("lead_score", 0) >= 70 else "status-warm" if lead.get("lead_score", 0) >= 50 else "status-cold"
-                st.markdown(f"<div class='data-card'><strong>{lead['name']}</strong> - Score: {lead['lead_score']}/100 <span class='{status_class}'>{lead['status']}</span><br><small>Added: {lead['created_at'][:10]}</small></div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='data-card'><strong>{lead['name']}</strong> - Score: {lead['lead_score']}/100 <span class='{status_class}'>{lead['status']}</span><br><small>Added: {lead['created_at'][:10]}</small></div>",
+                    unsafe_allow_html=True
+                )
         else:
             st.info("No leads yet. Research or import leads.")
     
@@ -346,29 +338,39 @@ elif st.session_state.current_page == 'research':
             with st.spinner(f"Researching {company_name}..."):
                 result = research_company(company_name)
                 
-                st.markdown(f"""
-                <div class="data-card">
-                    <h4>Company Information</h4>
-                    <p><strong>Name:</strong> {result['name']}</p>
-                    <p><strong>Website:</strong> {result['website']}</p>
-                    <p><strong>Email:</strong> {result['email']}</p>
-                    <p><strong>Phone:</strong> {result['phone']}</p>
-                    <p><strong>Address:</strong> {result['address']}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+                    <div class="data-card">
+                        <h4>Company Information</h4>
+                        <p><strong>Name:</strong> {result['name']}</p>
+                        <p><strong>Website:</strong> {result['website']}</p>
+                        <p><strong>Email:</strong> {result['email']}</p>
+                        <p><strong>Phone:</strong> {result['phone']}</p>
+                        <p><strong>Address:</strong> {result['address']}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
                 
                 if result.get('description'):
                     st.markdown(f"<div class='data-card'><p>{result['description']}</p></div>", unsafe_allow_html=True)
                 
-                st.markdown(f"""
-                <div class="data-card" style="text-align: center;">
-                    <h4>Lead Score</h4>
-                    <p style="font-size: 2.5rem; font-weight: 700; color: #667eea;">{result['lead_score']}/100</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+                    <div class="data-card" style="text-align: center;">
+                        <h4>Lead Score</h4>
+                        <p style="font-size: 2.5rem; font-weight: 700; color: #667eea;">{result['lead_score']}/100</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
                 
                 if result.get('recommendations'):
-                    st.markdown("<div class='data-card'><h4>Recommendations</h4><ul>" + "".join([f"<li>{r}</li>" for r in result['recommendations']]) + "</ul></div>", unsafe_allow_html=True)
+                    rec_html = "<div class='data-card'><h4>Recommendations</h4><ul>"
+                    for r in result['recommendations']:
+                        rec_html += f"<li>{r}</li>"
+                    rec_html += "</ul></div>"
+                    st.markdown(rec_html, unsafe_allow_html=True)
                 
                 if st.button("Add to CRM", type="primary"):
                     add_lead(result)
@@ -383,5 +385,155 @@ elif st.session_state.current_page == 'import':
     st.markdown("---")
     
     with st.expander("Format Instructions"):
-        st.markdown("""
-        **CSV Format:**
+        st.markdown("CSV Format: name,email,phone,website,address,lead_score")
+        st.markdown("JSON Format: [{'name': 'Example', 'email': 'info@example.com'}]")
+        st.markdown("Text Format: One company name per line")
+    
+    uploaded = st.file_uploader("Choose file", type=['csv', 'json', 'txt'])
+    
+    if uploaded:
+        ext = uploaded.name.split('.')[-1].lower()
+        if ext == 'csv':
+            success, msg = import_csv(uploaded)
+        elif ext == 'json':
+            success, msg = import_json(uploaded)
+        elif ext == 'txt':
+            success, msg = import_text(uploaded)
+        else:
+            success, msg = False, "Unsupported file type"
+        
+        if success:
+            st.success(msg)
+            st.rerun()
+        else:
+            st.error(msg)
+    
+    st.markdown("---")
+    st.markdown("### Manual Entry")
+    
+    with st.form("manual_lead"):
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Company Name*")
+            email = st.text_input("Email")
+            website = st.text_input("Website")
+        with col2:
+            phone = st.text_input("Phone")
+            address = st.text_input("Address")
+            score = st.slider("Lead Score", 0, 100, 50)
+        
+        if st.form_submit_button("Add Lead", type="primary"):
+            if name:
+                add_lead({
+                    "name": name,
+                    "email": email,
+                    "phone": phone,
+                    "website": website,
+                    "address": address,
+                    "lead_score": score,
+                    "source": "Manual Entry"
+                })
+                st.rerun()
+            else:
+                st.error("Company name is required")
+
+# ============ LEAD CRM ============
+elif st.session_state.current_page == 'crm':
+    st.markdown('<div class="section-header">Lead CRM</div>', unsafe_allow_html=True)
+    st.caption(f"Total Leads: {len(st.session_state.leads)}")
+    st.markdown("---")
+    
+    if st.session_state.leads:
+        search = st.text_input("Search", placeholder="Search by name, email, or website")
+        
+        filtered = st.session_state.leads
+        if search:
+            filtered = [l for l in filtered if search.lower() in l.get('name', '').lower() or search.lower() in l.get('email', '').lower() or search.lower() in l.get('website', '').lower()]
+        
+        st.caption(f"Showing {len(filtered)} of {len(st.session_state.leads)} leads")
+        
+        for lead in filtered:
+            status_class = "status-hot" if lead.get("lead_score", 0) >= 70 else "status-warm" if lead.get("lead_score", 0) >= 50 else "status-cold"
+            with st.expander(f"{lead['name']} - Score: {lead['lead_score']}/100 - {lead['status']}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"Email: {lead.get('email', 'N/A')}")
+                    st.write(f"Phone: {lead.get('phone', 'N/A')}")
+                    st.write(f"Website: {lead.get('website', 'N/A')}")
+                with col2:
+                    st.write(f"Address: {lead.get('address', 'N/A')}")
+                    st.write(f"Source: {lead.get('source', 'Manual')}")
+                    st.write(f"Added: {lead['created_at'][:10] if lead.get('created_at') else 'N/A'}")
+                
+                if lead.get('contacts'):
+                    st.write("Contacts:")
+                    for c in lead.get('contacts', []):
+                        st.write(f"- {c.get('name', '')} ({c.get('title', '')})")
+                
+                if st.button(f"Delete", key=f"del_{lead['id']}"):
+                    delete_lead(lead['id'])
+                    st.rerun()
+    else:
+        st.info("No leads yet. Research or import leads to get started.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Research Company", use_container_width=True):
+                st.session_state.current_page = 'research'
+                st.rerun()
+        with col2:
+            if st.button("Import Leads", use_container_width=True):
+                st.session_state.current_page = 'import'
+                st.rerun()
+
+# ============ EXPORT LEADS ============
+elif st.session_state.current_page == 'export':
+    st.markdown('<div class="section-header">Export Leads</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    
+    if st.session_state.leads:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            csv_data = export_csv()
+            st.download_button("Download CSV", csv_data, f"leads_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv", use_container_width=True)
+        
+        with col2:
+            json_data = export_json()
+            st.download_button("Download JSON", json_data, f"leads_{datetime.now().strftime('%Y%m%d')}.json", "application/json", use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown(f"Total Leads: {len(st.session_state.leads)}")
+        
+        with st.expander("Preview Data"):
+            preview_df = pd.DataFrame(st.session_state.leads)
+            st.dataframe(preview_df)
+    else:
+        st.info("No leads to export")
+
+# ============ SETTINGS ============
+elif st.session_state.current_page == 'settings':
+    st.markdown('<div class="section-header">Settings</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    
+    st.markdown("### Data Management")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Clear All Leads", type="secondary"):
+            st.session_state.leads = []
+            save_leads_to_file([])
+            st.success("All leads cleared!")
+            st.rerun()
+    
+    with col2:
+        st.markdown(f"Storage Location: {LEADS_FILE}")
+        st.markdown(f"Total Leads: {len(st.session_state.leads)}")
+    
+    st.markdown("---")
+    st.markdown("### API Configuration")
+    st.info("Add API keys to .streamlit/secrets.toml for full features")
+
+# ============ FOOTER ============
+st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
+st.caption("2024 TechWokx Enterprise Suite | hello@techwokx.online | +233 555 087 407")
