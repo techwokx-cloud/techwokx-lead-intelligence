@@ -1,5 +1,5 @@
 
-**Required field:** `name`
+**Required field:** name
 **Optional fields:** website, email, phone, address, lead_score
 """)
 
