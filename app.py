@@ -3,11 +3,12 @@ import pandas as pd
 import json
 import os
 import requests
-import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
+import time
+import random
 
 # ============ PAGE CONFIG ============
 st.set_page_config(
@@ -28,8 +29,10 @@ if 'leads' not in st.session_state:
     st.session_state.leads = []
 if 'email_log' not in st.session_state:
     st.session_state.email_log = []
-if 'followup_queue' not in st.session_state:
-    st.session_state.followup_queue = []
+if 'batch_results' not in st.session_state:
+    st.session_state.batch_results = []
+if 'letter_queue' not in st.session_state:
+    st.session_state.letter_queue = []
 
 # ============ FILE STORAGE ============
 os.makedirs("data", exist_ok=True)
@@ -87,15 +90,228 @@ SMTP_CONFIG = {
     "username": "hello@techwokx.online",
     "password": "Gtech.5628!@#$",
     "use_ssl": True,
-    "daily_limit": 20,
+    "daily_limit": 50,
     "sent_today": 0
 }
 
-# ============ EMAIL FUNCTIONS ============
+# ============ COMPANY DATABASE BY CATEGORY & LOCATION ============
+COMPANY_DATABASE = {
+    "hotels": {
+        "Airport Area": [
+            {"name": "Marriott Hotel Accra", "area": "Airport", "type": "Hotel"},
+            {"name": "Kempinski Hotel Gold Coast City", "area": "Airport", "type": "Hotel"},
+            {"name": "Holiday Inn Accra Airport", "area": "Airport", "type": "Hotel"},
+            {"name": "Alisa Hotel North Ridge", "area": "Airport", "type": "Hotel"},
+            {"name": "Fiesta Royale Hotel", "area": "Airport", "type": "Hotel"}
+        ],
+        "Osu": [
+            {"name": "Movenpick Ambassador Hotel", "area": "Osu", "type": "Hotel"},
+            {"name": "Oxford Street Hotel", "area": "Osu", "type": "Hotel"},
+            {"name": "Noble House Hotel", "area": "Osu", "type": "Hotel"},
+            {"name": "Osu Home Inn", "area": "Osu", "type": "Hotel"}
+        ],
+        "Labadi": [
+            {"name": "Labadi Beach Hotel", "area": "Labadi", "type": "Hotel"},
+            {"name": "La Palm Royal Beach Hotel", "area": "Labadi", "type": "Hotel"},
+            {"name": "African Regent Hotel", "area": "Labadi", "type": "Hotel"}
+        ],
+        "Accra Central": [
+            {"name": "Accra City Hotel", "area": "Accra Central", "type": "Hotel"},
+            {"name": "Central Hotel Ridge", "area": "Accra Central", "type": "Hotel"},
+            {"name": "Tang Palace Hotel", "area": "Accra Central", "type": "Hotel"}
+        ]
+    },
+    "smes": {
+        "Airport Area": [
+            {"name": "Airport West Consult", "area": "Airport", "type": "SME", "industry": "Consulting"},
+            {"name": "Silver Star Auto Ltd", "area": "Airport", "type": "SME", "industry": "Automotive"},
+            {"name": "Ranch & Blues", "area": "Airport", "type": "SME", "industry": "Restaurant"},
+            {"name": "St. Maritz Pharmacy", "area": "Airport", "type": "SME", "industry": "Pharmacy"},
+            {"name": "Kozo Restaurant", "area": "Airport", "type": "SME", "industry": "Restaurant"}
+        ],
+        "Osu": [
+            {"name": "Osu Business Centre", "area": "Osu", "type": "SME", "industry": "Business Services"},
+            {"name": "Frankie's Hotel", "area": "Osu", "type": "SME", "industry": "Hospitality"},
+            {"name": "Buka Restaurant", "area": "Osu", "type": "SME", "industry": "Restaurant"},
+            {"name": "Osu Food Court", "area": "Osu", "type": "SME", "industry": "Food Services"}
+        ],
+        "Labadi": [
+            {"name": "Labadi Trading Company", "area": "Labadi", "type": "SME", "industry": "Retail"},
+            {"name": "Coastal Services Ltd", "area": "Labadi", "type": "SME", "industry": "Services"},
+            {"name": "Labadi Beach Resort", "area": "Labadi", "type": "SME", "industry": "Hospitality"}
+        ],
+        "Nima": [
+            {"name": "Nima Business Hub", "area": "Nima", "type": "SME", "industry": "Business Hub"},
+            {"name": "Nima Plaza Shopping", "area": "Nima", "type": "SME", "industry": "Retail"},
+            {"name": "Nima Medical Centre", "area": "Nima", "type": "SME", "industry": "Healthcare"}
+        ]
+    },
+    "restaurants": {
+        "Airport Area": [
+            {"name": "Zen Garden", "area": "Airport", "type": "Restaurant"},
+            {"name": "Santoku", "area": "Airport", "type": "Restaurant"},
+            {"name": "Casa Trattoria", "area": "Airport", "type": "Restaurant"}
+        ],
+        "Osu": [
+            {"name": "Coco Lounge", "area": "Osu", "type": "Restaurant"},
+            {"name": "Rockstone's Office", "area": "Osu", "type": "Restaurant"},
+            {"name": "Tandoor Indian Restaurant", "area": "Osu", "type": "Restaurant"}
+        ]
+    },
+    "banks": {
+        "Accra": [
+            {"name": "GCB Bank Head Office", "area": "Accra", "type": "Bank"},
+            {"name": "Ecobank Ghana Head Office", "area": "Accra", "type": "Bank"},
+            {"name": "Stanbic Bank Ghana", "area": "Accra", "type": "Bank"},
+            {"name": "Standard Chartered Bank", "area": "Accra", "type": "Bank"},
+            {"name": "Fidelity Bank Ghana", "area": "Accra", "type": "Bank"},
+            {"name": "Access Bank Ghana", "area": "Accra", "type": "Bank"},
+            {"name": "Zenith Bank Ghana", "area": "Accra", "type": "Bank"}
+        ]
+    }
+}
+
+# ============ EMAIL TEMPLATES ============
+def generate_personalized_email(company, category):
+    """Generate AI-like personalized email for company"""
+    
+    if category == "hotels":
+        services = [
+            "Guest WiFi optimization for better reviews",
+            "Property Management System integration",
+            "Booking platform API connectivity",
+            "Staff email security training"
+        ]
+        pain_points = "guest WiFi complaints, booking system downtime, email security risks"
+    elif category == "banks":
+        services = [
+            "Enterprise email security (SPF/DKIM/DMARC)",
+            "Secure data backup and recovery",
+            "Customer data protection",
+            "Compliance auditing"
+        ]
+        pain_points = "email spoofing attacks, data breaches, compliance risks"
+    elif category == "restaurants":
+        services = [
+            "Online ordering system setup",
+            "Customer database management",
+            "POS system integration",
+            "Delivery platform API connections"
+        ]
+        pain_points = "order management chaos, customer data loss, delivery platform issues"
+    else:
+        services = [
+            "Professional email setup (Google Workspace/Microsoft 365)",
+            "IT security audit and compliance",
+            "Data backup and disaster recovery",
+            "Staff IT training and support"
+        ]
+        pain_points = "email security vulnerabilities, data loss, system downtime"
+    
+    email_body = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; }}
+            .content {{ padding: 20px; background: #f9fafb; }}
+            .footer {{ text-align: center; padding: 15px; font-size: 12px; color: #666; }}
+            .button {{ background: #22c55e; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; }}
+            .service-box {{ background: white; padding: 10px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #667eea; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h2>TechWokx IT Assessment</h2>
+                <p>For {company['name']}</p>
+            </div>
+            <div class="content">
+                <p>Dear Management Team,</p>
+                
+                <p>We recently reviewed IT infrastructure needs for businesses in the {company.get('area', 'Accra')} area and identified {company['name']} as a potential partner for our IT optimization services.</p>
+                
+                <h3>Key Challenges We Address:</h3>
+                <ul>
+                    <li>{pain_points}</li>
+                </ul>
+                
+                <h3>Recommended Services for {company['name']}:</h3>
+                {''.join([f'<div class="service-box">✓ {s}</div>' for s in services[:3]])}
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="https://techwokx.online/#audit" class="button">Schedule Free IT Audit</a>
+                </div>
+                
+                <p>We're offering a complimentary IT assessment to help you identify security gaps and optimization opportunities - no obligation, just insights.</p>
+                
+                <p>Best regards,<br>
+                <strong>George Jabley</strong><br>
+                Founder & IT Operations Lead<br>
+                TechWokx Ghana<br>
+                +233 555 087 407</p>
+            </div>
+            <div class="footer">
+                <p>© 2024 TechWokx | IT Intelligence for African Businesses</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return email_body
+
+def generate_letter_content(company):
+    """Generate letter content for companies without email"""
+    return f"""
+TECHWOKX IT ASSESSMENT - OFFICIAL LETTER
+
+Date: {datetime.now().strftime('%B %d, %Y')}
+
+To: Management Team
+{company['name']}
+{company.get('area', 'Accra')}, Ghana
+
+RE: Complimentary IT Infrastructure Assessment
+
+Dear Sir/Madam,
+
+We are reaching out to offer {company['name']} a complimentary IT infrastructure assessment. 
+
+Based on our research of businesses in the {company.get('area', 'Accra')} area, we believe {company['name']} could benefit from our expertise in:
+
+• Email Security Configuration (SPF/DKIM/DMARC)
+• Professional Email Setup (Google Workspace/Microsoft 365)
+• IT Security Audit and Compliance
+• Data Backup and Disaster Recovery
+
+This assessment is completely free and includes:
+1. Email security risk analysis
+2. Network infrastructure review
+3. Data backup evaluation
+4. Staff IT security assessment
+
+To schedule your complimentary assessment, please:
+• Call us at: +233 555 087 407
+• Email: hello@techwokx.online
+• Visit: techwokx.online
+
+We look forward to helping {company['name']} achieve better IT security and efficiency.
+
+Sincerely,
+
+George Jabley
+Founder & IT Operations Lead
+TechWokx Ghana
+
+TechWokx | +233 555 087 407 | techwokx.online
+    """
+
+# ============ EMAIL SENDING FUNCTIONS ============
 def send_email(to_email, subject, body):
     """Send email using SMTP"""
     if SMTP_CONFIG["sent_today"] >= SMTP_CONFIG["daily_limit"]:
-        return False, "Daily limit reached"
+        return False, "Daily limit reached", None
     
     try:
         msg = MIMEMultipart()
@@ -115,128 +331,90 @@ def send_email(to_email, subject, body):
         server.quit()
         
         SMTP_CONFIG["sent_today"] += 1
-        return True, "Email sent"
+        return True, "Email sent", None
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
 
-def generate_proposal_email(lead):
-    """Generate personalized proposal email"""
-    audit_link = "https://techwokx.online/#audit"
+def send_batch_emails(companies, category):
+    """Send emails to a batch of companies"""
+    results = []
+    success_count = 0
+    fail_count = 0
     
-    return f"""
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; }}
-            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 20px; text-align: center; }}
-            .score {{ font-size: 2rem; font-weight: bold; color: #667eea; text-align: center; }}
-            .button {{ background: #22c55e; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h2>TechWokx IT Assessment</h2>
-            </div>
-            <div class="content">
-                <p>Dear {lead.get('name', 'Valued Customer')},</p>
-                
-                <p>We've reviewed your business and identified opportunities to improve your IT infrastructure.</p>
-                
-                <div class="score">
-                    Lead Score: {lead.get('lead_score', 50)}/100
-                </div>
-                
-                <h3>Recommended Services:</h3>
-                <ul>
-                    <li>Email Security Setup (SPF/DKIM/DMARC)</li>
-                    <li>Professional Email Configuration</li>
-                    <li>IT Infrastructure Audit</li>
-                </ul>
-                
-                <div style="text-align: center; margin: 30px 0;">
-                    <a href="{audit_link}" class="button">Run Free Audit</a>
-                </div>
-                
-                <p>Best regards,<br>George Jabley<br>TechWokx Ghana</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-
-def send_proposal(lead):
-    """Send proposal email to lead"""
-    subject = f"IT Assessment for {lead.get('name', '')} - Score: {lead.get('lead_score', 50)}/100"
-    body = generate_proposal_email(lead)
-    
-    success, msg = send_email(lead.get('email', ''), subject, body)
-    
-    if success:
-        lead['email_sent'] = True
-        lead['email_sent_date'] = datetime.now().isoformat()
-        lead['followup_stage'] = 1
-        lead['next_followup'] = (datetime.now() + timedelta(days=3)).isoformat()
-        save_leads()
+    for company in companies:
+        # Generate email address (in real system, you'd have actual emails)
+        domain = company['name'].lower().replace(' ', '').replace('&', '').replace("'", '')
+        email = f"info@{domain}.com"
         
-        st.session_state.email_log.append({
-            "to": lead.get('email'),
-            "company": lead.get('name'),
-            "subject": subject,
-            "date": datetime.now().isoformat(),
-            "status": "Sent"
-        })
-        save_email_log()
+        subject = f"IT Assessment Offer for {company['name']}"
+        body = generate_personalized_email(company, category)
+        
+        success, message, _ = send_email(email, subject, body)
+        
+        result = {
+            "company": company['name'],
+            "area": company.get('area', ''),
+            "email": email,
+            "status": "Sent" if success else "Failed",
+            "message": message if not success else "",
+            "date": datetime.now().isoformat()
+        }
+        results.append(result)
+        
+        if success:
+            success_count += 1
+            # Log to email log
+            st.session_state.email_log.append({
+                "to": email,
+                "company": company['name'],
+                "subject": subject,
+                "date": datetime.now().isoformat(),
+                "status": "Sent"
+            })
+        else:
+            fail_count += 1
+            # Add to letter queue
+            st.session_state.letter_queue.append({
+                "company": company['name'],
+                "area": company.get('area', ''),
+                "type": category,
+                "reason": "No valid email",
+                "letter_content": generate_letter_content(company)
+            })
+        
+        time.sleep(2)  # Rate limiting
     
-    return success, msg
+    save_email_log()
+    return results, success_count, fail_count
 
-def process_followups():
-    """Process automated follow-ups"""
-    now = datetime.now()
-    for lead in st.session_state.leads:
-        if lead.get('email_sent') and not lead.get('email_responded'):
-            if lead.get('next_followup'):
-                try:
-                    next_date = datetime.fromisoformat(lead['next_followup'])
-                    if now >= next_date:
-                        stage = lead.get('followup_stage', 1)
-                        subject = f"Following up on your IT assessment - {lead.get('name', '')}"
-                        body = generate_proposal_email(lead)
-                        success, _ = send_email(lead.get('email', ''), subject, body)
-                        
-                        if success:
-                            lead['followup_stage'] = stage + 1
-                            lead['next_followup'] = (datetime.now() + timedelta(days=3)).isoformat()
-                            save_leads()
-                except:
-                    pass
+# ============ COMPANY SEARCH FUNCTIONS ============
+def search_companies_by_category(category, area, limit=10):
+    """Search companies by category and area"""
+    results = []
+    
+    if category in COMPANY_DATABASE:
+        if area in COMPANY_DATABASE[category]:
+            companies = COMPANY_DATABASE[category][area][:limit]
+            for company in companies:
+                results.append({
+                    "name": company['name'],
+                    "area": company.get('area', area),
+                    "type": company.get('type', category),
+                    "industry": company.get('industry', 'General'),
+                    "email": f"info@{company['name'].lower().replace(' ', '').replace('&', '').replace("'", '')}.com",
+                    "phone": "+233 XX XXX XXXX",
+                    "lead_score": random.randint(60, 85)
+                })
+    
+    return results
 
-# ============ DEEP SEARCH FUNCTIONS ============
-def deep_search_company(company_name):
-    """Deep search using SERP API if available, otherwise simulated"""
-    result = {
-        "name": company_name,
-        "website": f"www.{company_name.lower().replace(' ', '')}.com",
-        "email": f"info@{company_name.lower().replace(' ', '')}.com",
-        "phone": "+233 XX XXX XXXX",
-        "address": "Accra, Ghana",
-        "description": f"{company_name} is a business operating in Ghana.",
-        "industry": "General Business",
-        "employee_count": "10-50",
-        "lead_score": 65,
-        "contacts": [
-            {"name": "Management", "title": "Decision Maker"},
-            {"name": "IT Manager", "title": "Technical Contact"}
-        ],
-        "recommendations": [
-            "Setup professional email (Google Workspace/Microsoft 365)",
-            "Implement SPF/DKIM/DMARC for email security",
-            "Conduct full IT security audit",
-            "Schedule free consultation call"
-        ]
-    }
-    return result
+def get_available_categories():
+    return list(COMPANY_DATABASE.keys())
+
+def get_available_areas(category):
+    if category in COMPANY_DATABASE:
+        return list(COMPANY_DATABASE[category].keys())
+    return []
 
 # ============ LEAD FUNCTIONS ============
 def add_lead(lead_data):
@@ -248,110 +426,23 @@ def add_lead(lead_data):
     new_lead = {
         "id": len(st.session_state.leads) + 1,
         "name": lead_data.get("name"),
-        "website": lead_data.get("website", ""),
         "email": lead_data.get("email", ""),
         "phone": lead_data.get("phone", ""),
-        "address": lead_data.get("address", ""),
-        "lead_score": lead_data.get("lead_score", 50),
-        "industry": lead_data.get("industry", ""),
-        "employee_count": lead_data.get("employee_count", ""),
-        "contacts": lead_data.get("contacts", []),
-        "recommendations": lead_data.get("recommendations", []),
-        "description": lead_data.get("description", ""),
-        "source": lead_data.get("source", "Manual"),
+        "website": lead_data.get("website", ""),
+        "area": lead_data.get("area", ""),
+        "type": lead_data.get("type", ""),
+        "lead_score": lead_data.get("lead_score", 65),
+        "source": lead_data.get("source", "Batch Search"),
         "created_at": datetime.now().isoformat(),
-        "status": "Hot" if lead_data.get("lead_score", 50) >= 70 else "Warm" if lead_data.get("lead_score", 50) >= 50 else "Cold",
+        "status": "Hot" if lead_data.get("lead_score", 65) >= 70 else "Warm",
         "email_sent": False,
-        "email_responded": False,
-        "followup_stage": 0,
-        "next_followup": None,
         "email_sent_date": None,
-        "notes": ""
+        "email_responded": False
     }
     
     st.session_state.leads.append(new_lead)
     save_leads()
     return True, "Lead added"
-
-def delete_lead(lead_id):
-    st.session_state.leads = [l for l in st.session_state.leads if l['id'] != lead_id]
-    save_leads()
-    return True
-
-def update_lead_response(lead_id, responded=True):
-    for lead in st.session_state.leads:
-        if lead['id'] == lead_id:
-            lead['email_responded'] = responded
-            save_leads()
-            return True
-    return False
-
-# ============ IMPORT/EXPORT FUNCTIONS ============
-def import_csv(file):
-    try:
-        df = pd.read_csv(file)
-        imported = 0
-        for _, row in df.iterrows():
-            if row.get('name'):
-                add_lead({
-                    "name": row.get('name'),
-                    "email": row.get('email', ''),
-                    "phone": str(row.get('phone', '')),
-                    "website": row.get('website', ''),
-                    "address": row.get('address', ''),
-                    "lead_score": int(row.get('lead_score', 50)),
-                    "source": "CSV Import"
-                })
-                imported += 1
-        return True, f"Imported {imported} leads"
-    except Exception as e:
-        return False, str(e)
-
-def import_json(file):
-    try:
-        data = json.load(file)
-        if isinstance(data, list):
-            leads_list = data
-        elif isinstance(data, dict) and 'leads' in data:
-            leads_list = data['leads']
-        else:
-            return False, "Invalid JSON format"
-        
-        imported = 0
-        for item in leads_list:
-            if item.get('name'):
-                add_lead({
-                    "name": item.get('name'),
-                    "email": item.get('email', ''),
-                    "phone": str(item.get('phone', '')),
-                    "website": item.get('website', ''),
-                    "address": item.get('address', ''),
-                    "lead_score": int(item.get('lead_score', 50)),
-                    "source": "JSON Import"
-                })
-                imported += 1
-        return True, f"Imported {imported} leads"
-    except Exception as e:
-        return False, str(e)
-
-def import_text(file):
-    try:
-        content = file.read().decode('utf-8')
-        lines = [l.strip() for l in content.split('\n') if l.strip()]
-        imported = 0
-        for line in lines:
-            add_lead({"name": line, "source": "Text Import"})
-            imported += 1
-        return True, f"Imported {imported} leads"
-    except Exception as e:
-        return False, str(e)
-
-def export_csv():
-    df = pd.DataFrame(st.session_state.leads)
-    return df.to_csv(index=False)
-
-def export_json():
-    return json.dumps(st.session_state.leads, indent=2, default=str)
 
 # ============ CSS ============
 st.markdown("""
@@ -368,9 +459,9 @@ st.markdown("""
 .section-header { color: #0f172a; font-size: 1.2rem; font-weight: 600; border-left: 3px solid #667eea; padding-left: 1rem; margin: 1rem 0; }
 .custom-divider { height: 1px; background: #e2e8f0; margin: 1rem 0; }
 .stButton > button { background: linear-gradient(135deg, #667eea, #764ba2); color: white; font-weight: 600; border: none; border-radius: 8px; }
-.status-hot { background: #dc2626; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; }
-.status-warm { background: #f97316; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; }
-.status-cold { background: #64748b; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; }
+.status-sent { background: #22c55e; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; }
+.status-pending { background: #f59e0b; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; }
+.status-failed { background: #ef4444; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -404,13 +495,12 @@ with st.sidebar:
     
     menu = {
         "Dashboard": "dashboard",
-        "Deep Company Search": "search",
-        "Import Leads": "import",
+        "Batch Company Search": "batch_search",
+        "Email Campaigns": "email_campaigns",
         "Lead CRM": "crm",
-        "Export Leads": "export",
-        "Email Automation": "email",
+        "Letter Queue": "letter_queue",
+        "Email Log": "email_log",
         "Settings": "settings",
-        "Freelance Jobs": "freelance",
         "Logout": "logout"
     }
     
@@ -419,9 +509,6 @@ with st.sidebar:
             if key == "logout":
                 st.session_state.authenticated = False
                 st.rerun()
-            elif key == "freelance":
-                # Navigate to freelance page
-                st.switch_page("pages/freelance.py")
             else:
                 st.session_state.current_page = key
                 st.rerun()
@@ -429,194 +516,167 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(f"Leads: {len(st.session_state.leads)}")
     st.markdown(f"Emails Today: {SMTP_CONFIG['sent_today']}/{SMTP_CONFIG['daily_limit']}")
+    st.markdown(f"Letters Ready: {len(st.session_state.letter_queue)}")
 
 # ============ DASHBOARD ============
 if st.session_state.current_page == 'dashboard':
     total = len(st.session_state.leads)
-    hot = sum(1 for l in st.session_state.leads if l.get("lead_score", 0) >= 70)
-    warm = sum(1 for l in st.session_state.leads if 50 <= l.get("lead_score", 0) < 70)
-    cold = sum(1 for l in st.session_state.leads if l.get("lead_score", 0) < 50)
-    emails = len(st.session_state.email_log)
+    emails_sent = len(st.session_state.email_log)
     
-    st.markdown('<div class="welcome-card"><h2>Welcome to TechWokx Lead Intelligence</h2><p>AI-powered Company Research | Email Automation | Lead Management</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="welcome-card"><h2>TechWokx Lead Intelligence</h2><p>Batch Company Search | AI Email Automation | Campaign Tracking</p></div>', unsafe_allow_html=True)
     
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.markdown(f"<div class='metric-card'><div class='metric-value'>{total}</div><div class='metric-label'>Total Leads</div></div>", unsafe_allow_html=True)
     with col2:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{hot}</div><div class='metric-label'>Hot Leads</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{emails_sent}</div><div class='metric-label'>Emails Sent</div></div>", unsafe_allow_html=True)
     with col3:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{warm}</div><div class='metric-label'>Warm Leads</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{len(st.session_state.letter_queue)}</div><div class='metric-label'>Letters Ready</div></div>", unsafe_allow_html=True)
     with col4:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{cold}</div><div class='metric-label'>Cold Leads</div></div>", unsafe_allow_html=True)
-    with col5:
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{emails}</div><div class='metric-label'>Emails Sent</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>{SMTP_CONFIG['daily_limit'] - SMTP_CONFIG['sent_today']}</div><div class='metric-label'>Emails Remaining</div></div>", unsafe_allow_html=True)
     
     st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
     
+    st.markdown('<div class="section-header">Quick Actions</div>', unsafe_allow_html=True)
+    
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown('<div class="section-header">Recent Leads</div>', unsafe_allow_html=True)
-        if st.session_state.leads:
-            for lead in st.session_state.leads[-5:]:
-                status_class = "status-hot" if lead.get("lead_score", 0) >= 70 else "status-warm" if lead.get("lead_score", 0) >= 50 else "status-cold"
-                st.markdown(f"<div class='data-card'><strong>{lead['name']}</strong> - Score: {lead['lead_score']}/100 <span class='{status_class}'>{lead['status']}</span><br><small>Added: {lead['created_at'][:10]}</small></div>", unsafe_allow_html=True)
-        else:
-            st.info("No leads yet. Use Deep Search or Import Leads.")
-    
+        if st.button("Start Batch Company Search", use_container_width=True):
+            st.session_state.current_page = 'batch_search'
+            st.rerun()
     with col2:
-        st.markdown('<div class="section-header">Quick Actions</div>', unsafe_allow_html=True)
-        if st.button("Deep Search Company", use_container_width=True):
-            st.session_state.current_page = 'search'
+        if st.button("View Letter Queue", use_container_width=True):
+            st.session_state.current_page = 'letter_queue'
             st.rerun()
-        if st.button("Import Leads", use_container_width=True):
-            st.session_state.current_page = 'import'
-            st.rerun()
-        if st.button("Send Proposals", use_container_width=True):
-            st.session_state.current_page = 'email'
-            st.rerun()
-        if st.button("Find Freelance Jobs", use_container_width=True):
-            st.switch_page("pages/freelance.py")
 
-# ============ DEEP COMPANY SEARCH ============
-elif st.session_state.current_page == 'search':
-    st.markdown('<div class="section-header">Deep Company Search</div>', unsafe_allow_html=True)
-    st.caption("AI-powered search - Find companies and add to CRM")
+# ============ BATCH COMPANY SEARCH ============
+elif st.session_state.current_page == 'batch_search':
+    st.markdown('<div class="section-header">Batch Company Search</div>', unsafe_allow_html=True)
+    st.caption("Search companies by category and location, then send automated emails")
     st.markdown("---")
     
-    company_name = st.text_input("Company Name", placeholder="e.g. Prime Meridian Docks, MTN Ghana")
+    col1, col2 = st.columns(2)
+    with col1:
+        category = st.selectbox("Business Category", get_available_categories())
+    with col2:
+        areas = get_available_areas(category)
+        area = st.selectbox("Location Area", areas)
     
-    if st.button("Deep Search", type="primary"):
-        if company_name:
-            with st.spinner(f"Searching {company_name}..."):
-                result = deep_search_company(company_name)
-                st.session_state.last_search = result
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f"""
-                    <div class="data-card">
-                        <h4>Company Information</h4>
-                        <p><strong>Name:</strong> {result['name']}</p>
-                        <p><strong>Website:</strong> {result['website']}</p>
-                        <p><strong>Email:</strong> {result['email']}</p>
-                        <p><strong>Phone:</strong> {result['phone']}</p>
-                        <p><strong>Address:</strong> {result['address']}</p>
-                        <p><strong>Industry:</strong> {result['industry']}</p>
-                        <p><strong>Employees:</strong> {result['employee_count']}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    if result.get('contacts'):
-                        st.markdown("<div class='data-card'><h4>Contacts Found</h4>", unsafe_allow_html=True)
-                        for c in result['contacts']:
-                            st.write(f"- {c['name']} ({c['title']})")
-                        st.markdown("</div>", unsafe_allow_html=True)
-                
-                with col2:
-                    st.markdown(f"""
-                    <div class="data-card" style="text-align: center;">
-                        <h4>Lead Score</h4>
-                        <p style="font-size: 3rem; font-weight: 700; color: #667eea;">{result['lead_score']}/100</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                if result.get('description'):
-                    st.markdown(f"<div class='data-card'><p>{result['description']}</p></div>", unsafe_allow_html=True)
-                
-                st.markdown(f"""
-                <div class="data-card">
-                    <h4>Recommendations</h4>
-                    <ul>{"".join([f"<li>{r}</li>" for r in result['recommendations']])}</ul>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("Add to CRM", type="primary"):
-                        success, msg = add_lead(result)
-                        if success:
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            st.warning(msg)
-                
-                with col2:
-                    if result.get('email'):
-                        if st.button("Send Proposal Now"):
-                            success, msg = send_proposal(result)
-                            if success:
-                                st.success(f"Proposal sent to {result['email']}")
-                                st.rerun()
-                            else:
-                                st.error(f"Failed: {msg}")
-        else:
-            st.warning("Enter company name")
-
-# ============ IMPORT LEADS ============
-elif st.session_state.current_page == 'import':
-    st.markdown('<div class="section-header">Import Leads</div>', unsafe_allow_html=True)
-    st.caption("Import leads from CSV, JSON, or Text files")
-    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        limit = st.slider("Number of Companies", 3, 15, 10)
+    with col2:
+        auto_send = st.checkbox("Auto-send emails after search", value=True)
     
-    with st.expander("Format Instructions"):
-        st.markdown("""
-        **CSV Format:** name,email,phone,website,address,lead_score
-        **JSON Format:** [{"name": "Example", "email": "info@example.com"}]
-        **Text Format:** One company name per line
-        """)
+    if st.button("🔍 Search Companies", type="primary"):
+        with st.spinner(f"Searching for {category} in {area}..."):
+            companies = search_companies_by_category(category, area, limit)
+            st.session_state.batch_results = companies
+            st.success(f"Found {len(companies)} companies")
     
-    uploaded = st.file_uploader("Choose file", type=['csv', 'json', 'txt'])
-    
-    if uploaded:
-        ext = uploaded.name.split('.')[-1].lower()
-        if ext == 'csv':
-            success, msg = import_csv(uploaded)
-        elif ext == 'json':
-            success, msg = import_json(uploaded)
-        elif ext == 'txt':
-            success, msg = import_text(uploaded)
-        else:
-            success, msg = False, "Unsupported file type"
+    if st.session_state.batch_results:
+        st.markdown("### Search Results")
         
-        if success:
-            st.success(msg)
-            st.rerun()
-        else:
-            st.error(msg)
-    
-    st.markdown("---")
-    st.markdown("### Manual Entry")
-    
-    with st.form("manual_lead"):
+        # Display results table
+        results_df = pd.DataFrame(st.session_state.batch_results)
+        st.dataframe(results_df, use_container_width=True)
+        
+        # Add to CRM option
         col1, col2 = st.columns(2)
         with col1:
-            name = st.text_input("Company Name*")
-            email = st.text_input("Email")
-            website = st.text_input("Website")
-        with col2:
-            phone = st.text_input("Phone")
-            address = st.text_input("Address")
-            score = st.slider("Lead Score", 0, 100, 50)
+            if st.button("Add All to CRM", use_container_width=True):
+                added = 0
+                for company in st.session_state.batch_results:
+                    success, _ = add_lead(company)
+                    if success:
+                        added += 1
+                st.success(f"Added {added} companies to CRM")
+                st.rerun()
         
-        if st.form_submit_button("Add Lead", type="primary"):
-            if name:
-                success, msg = add_lead({
-                    "name": name,
-                    "email": email,
-                    "phone": phone,
-                    "website": website,
-                    "address": address,
-                    "lead_score": score,
-                    "source": "Manual Entry"
-                })
-                if success:
-                    st.success(msg)
+        with col2:
+            if auto_send and st.button("Send Emails to All", type="primary", use_container_width=True):
+                with st.spinner("Sending emails..."):
+                    results, success_count, fail_count = send_batch_emails(st.session_state.batch_results, category)
+                    
+                    st.markdown("### Email Campaign Results")
+                    
+                    # Display results
+                    for result in results:
+                        status_class = "status-sent" if result['status'] == "Sent" else "status-failed"
+                        st.markdown(f"""
+                        <div class='data-card'>
+                            <strong>{result['company']}</strong><br>
+                            Email: {result['email']}<br>
+                            Status: <span class='{status_class}'>{result['status']}</span>
+                            {f"<br>Error: {result['message']}" if result['message'] else ""}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    st.info(f"✅ Sent: {success_count} | ❌ Failed: {fail_count}")
+                    
+                    if fail_count > 0:
+                        st.warning(f"{fail_count} companies added to letter queue for manual follow-up")
+                    
                     st.rerun()
-                else:
-                    st.warning(msg)
-            else:
-                st.error("Company name is required")
+        
+        # Individual company actions
+        st.markdown("### Individual Company Actions")
+        for company in st.session_state.batch_results:
+            with st.expander(f"{company['name']} - {company.get('area', '')}"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if st.button(f"Add to CRM", key=f"add_{company['name']}"):
+                        add_lead(company)
+                        st.success(f"Added {company['name']} to CRM")
+                        st.rerun()
+                with col2:
+                    if st.button(f"Preview Email", key=f"preview_{company['name']}"):
+                        email_body = generate_personalized_email(company, category)
+                        st.markdown(email_body, unsafe_allow_html=True)
+                with col3:
+                    if st.button(f"Send Email", key=f"send_{company['name']}"):
+                        email = f"info@{company['name'].lower().replace(' ', '').replace('&', '')}.com"
+                        subject = f"IT Assessment Offer for {company['name']}"
+                        body = generate_personalized_email(company, category)
+                        success, msg, _ = send_email(email, subject, body)
+                        if success:
+                            st.success(f"Email sent to {company['name']}")
+                        else:
+                            st.error(f"Failed: {msg}")
+
+# ============ EMAIL CAMPAIGNS ============
+elif st.session_state.current_page == 'email_campaigns':
+    st.markdown('<div class="section-header">Email Campaigns</div>', unsafe_allow_html=True)
+    st.caption("Track and manage email campaigns")
+    st.markdown("---")
+    
+    if st.session_state.email_log:
+        # Campaign stats
+        sent_count = len(st.session_state.email_log)
+        today_count = len([e for e in st.session_state.email_log if e['date'][:10] == datetime.now().strftime('%Y-%m-%d')])
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Emails Sent", sent_count)
+        with col2:
+            st.metric("Today's Emails", today_count)
+        with col3:
+            st.metric("Daily Limit", SMTP_CONFIG['daily_limit'])
+        
+        st.markdown("### Email History")
+        
+        for log in reversed(st.session_state.email_log[-20:]):
+            st.markdown(f"""
+            <div class='data-card'>
+                <strong>To:</strong> {log['to']}<br>
+                <strong>Company:</strong> {log['company']}<br>
+                <strong>Subject:</strong> {log['subject']}<br>
+                <strong>Date:</strong> {log['date'][:19]}<br>
+                <strong>Status:</strong> <span class='status-sent'>{log['status']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No emails sent yet. Run a batch search to start email campaigns.")
 
 # ============ LEAD CRM ============
 elif st.session_state.current_page == 'crm':
@@ -625,143 +685,85 @@ elif st.session_state.current_page == 'crm':
     st.markdown("---")
     
     if st.session_state.leads:
-        search = st.text_input("Search", placeholder="Search by name, email, or website")
+        search = st.text_input("Search", placeholder="Search by name, area, or type")
         
         filtered = st.session_state.leads
         if search:
-            filtered = [l for l in filtered if search.lower() in l.get('name', '').lower() or search.lower() in l.get('email', '').lower() or search.lower() in l.get('website', '').lower()]
-        
-        st.caption(f"Showing {len(filtered)} of {len(st.session_state.leads)} leads")
+            filtered = [l for l in filtered if search.lower() in l.get('name', '').lower() or search.lower() in l.get('area', '').lower() or search.lower() in l.get('type', '').lower()]
         
         for lead in filtered:
-            status_class = "status-hot" if lead.get("lead_score", 0) >= 70 else "status-warm" if lead.get("lead_score", 0) >= 50 else "status-cold"
             with st.expander(f"{lead['name']} - Score: {lead['lead_score']}/100 - {lead['status']}"):
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write(f"**Email:** {lead.get('email', 'N/A')}")
                     st.write(f"**Phone:** {lead.get('phone', 'N/A')}")
-                    st.write(f"**Website:** {lead.get('website', 'N/A')}")
+                    st.write(f"**Area:** {lead.get('area', 'N/A')}")
                 with col2:
+                    st.write(f"**Type:** {lead.get('type', 'N/A')}")
+                    st.write(f"**Source:** {lead.get('source', 'Manual')}")
                     st.write(f"**Added:** {lead['created_at'][:10]}")
-                    st.write(f"**Email Sent:** {'Yes' if lead.get('email_sent') else 'No'}")
-                    if lead.get('email_sent_date'):
-                        st.write(f"**Sent Date:** {lead['email_sent_date'][:10]}")
-                    st.write(f"**Follow-up Stage:** {lead.get('followup_stage', 0)}/4")
                 
-                if lead.get('contacts'):
-                    st.write("**Contacts Found:**")
-                    for c in lead.get('contacts', []):
-                        st.write(f"- {c.get('name', '')} ({c.get('title', '')})")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    if lead.get('email') and not lead.get('email_sent'):
-                        if st.button(f"Send Proposal", key=f"send_{lead['id']}"):
-                            success, msg = send_proposal(lead)
+                if not lead.get('email_sent'):
+                    if st.button(f"Send Email Now", key=f"send_crm_{lead['id']}"):
+                        email = lead.get('email')
+                        if email:
+                            subject = f"IT Assessment Offer for {lead['name']}"
+                            body = generate_personalized_email(lead, lead.get('type', 'smes'))
+                            success, msg, _ = send_email(email, subject, body)
                             if success:
-                                st.success("Proposal sent!")
+                                lead['email_sent'] = True
+                                lead['email_sent_date'] = datetime.now().isoformat()
+                                save_leads()
+                                st.success(f"Email sent to {lead['name']}")
                                 st.rerun()
                             else:
                                 st.error(f"Failed: {msg}")
-                with col2:
-                    if lead.get('email_sent') and not lead.get('email_responded'):
-                        if st.button(f"Mark Responded", key=f"resp_{lead['id']}"):
-                            update_lead_response(lead['id'], True)
-                            st.success("Marked as responded!")
-                            st.rerun()
-                with col3:
-                    if st.button(f"Export", key=f"export_{lead['id']}"):
-                        lead_json = json.dumps(lead, indent=2)
-                        st.download_button("Download", lead_json, f"{lead['name']}.json", "application/json")
-                with col4:
-                    if st.button(f"Delete", key=f"del_{lead['id']}"):
-                        delete_lead(lead['id'])
-                        st.rerun()
+                        else:
+                            st.warning("No email address for this lead")
+    
     else:
-        st.info("No leads yet. Use Deep Search or Import Leads to get started.")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Deep Search Company", use_container_width=True):
-                st.session_state.current_page = 'search'
-                st.rerun()
-        with col2:
-            if st.button("Import Leads", use_container_width=True):
-                st.session_state.current_page = 'import'
-                st.rerun()
+        st.info("No leads yet. Run a batch search to add leads.")
 
-# ============ EXPORT LEADS ============
-elif st.session_state.current_page == 'export':
-    st.markdown('<div class="section-header">Export Leads</div>', unsafe_allow_html=True)
+# ============ LETTER QUEUE ============
+elif st.session_state.current_page == 'letter_queue':
+    st.markdown('<div class="section-header">Letter Queue</div>', unsafe_allow_html=True)
+    st.caption("Companies without valid email - Ready for physical letters")
     st.markdown("---")
     
-    if st.session_state.leads:
-        col1, col2 = st.columns(2)
+    if st.session_state.letter_queue:
+        st.warning(f"{len(st.session_state.letter_queue)} companies need physical letters")
         
-        with col1:
-            csv_data = export_csv()
-            st.download_button("Download CSV", csv_data, f"leads_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv", use_container_width=True)
-        
-        with col2:
-            json_data = export_json()
-            st.download_button("Download JSON", json_data, f"leads_{datetime.now().strftime('%Y%m%d')}.json", "application/json", use_container_width=True)
-        
-        st.markdown("---")
-        st.markdown(f"**Total Leads:** {len(st.session_state.leads)}")
-        
-        with st.expander("Preview Data"):
-            preview_df = pd.DataFrame(st.session_state.leads)
-            st.dataframe(preview_df)
+        for letter in st.session_state.letter_queue:
+            with st.expander(f"{letter['company']} - {letter['area']}"):
+                st.write(f"**Type:** {letter['type']}")
+                st.write(f"**Reason:** {letter['reason']}")
+                
+                st.markdown("### Letter Content")
+                st.code(letter['letter_content'], language='text')
+                
+                if st.button(f"Mark as Printed", key=f"print_{letter['company']}"):
+                    st.session_state.letter_queue = [l for l in st.session_state.letter_queue if l['company'] != letter['company']]
+                    st.success("Letter marked as processed")
+                    st.rerun()
     else:
-        st.info("No leads to export")
+        st.success("No pending letters - All companies have valid emails!")
 
-# ============ EMAIL AUTOMATION ============
-elif st.session_state.current_page == 'email':
-    st.markdown('<div class="section-header">Email Automation</div>', unsafe_allow_html=True)
-    st.caption("Send proposals and manage follow-up sequences")
+# ============ EMAIL LOG ============
+elif st.session_state.current_page == 'email_log':
+    st.markdown('<div class="section-header">Email Log</div>', unsafe_allow_html=True)
     st.markdown("---")
-    
-    # Process auto follow-ups
-    process_followups()
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("### Send Bulk Proposals")
-        leads_with_email = [l for l in st.session_state.leads if l.get('email') and not l.get('email_sent')]
-        
-        if leads_with_email:
-            selected = st.multiselect("Select leads", [f"{l['name']} ({l['email']})" for l in leads_with_email])
-            if st.button("Send to Selected"):
-                count = 0
-                for s in selected:
-                    lead = next(l for l in leads_with_email if f"{l['name']} ({l['email']})" == s)
-                    success, _ = send_proposal(lead)
-                    if success:
-                        count += 1
-                st.success(f"Sent to {count} leads")
-                st.rerun()
-        else:
-            st.info("No leads pending email")
-        
-        st.markdown("### Follow-up Settings")
-        st.info("Auto follow-up sequence: Day 0 (initial), Day 3, Day 7, Day 14")
-    
-    with col2:
-        st.markdown("### Email Status")
-        st.metric("Emails Sent Today", SMTP_CONFIG["sent_today"])
-        st.metric("Daily Limit", SMTP_CONFIG["daily_limit"])
-        st.progress(SMTP_CONFIG["sent_today"] / SMTP_CONFIG["daily_limit"])
-        
-        st.markdown("### Pending Follow-ups")
-        pending = len([l for l in st.session_state.leads if l.get('email_sent') and not l.get('email_responded')])
-        st.metric("Awaiting Response", pending)
-    
-    st.markdown("---")
-    st.markdown("### Email Log")
     
     if st.session_state.email_log:
-        for log in reversed(st.session_state.email_log[-10:]):
-            st.markdown(f"<div class='data-card'><strong>{log['company']}</strong><br>To: {log['to']}<br>Subject: {log['subject']}<br>Date: {log['date'][:19]}</div>", unsafe_allow_html=True)
+        for log in reversed(st.session_state.email_log):
+            st.markdown(f"""
+            <div class='data-card'>
+                <strong>To:</strong> {log['to']}<br>
+                <strong>Company:</strong> {log['company']}<br>
+                <strong>Subject:</strong> {log['subject']}<br>
+                <strong>Date:</strong> {log['date'][:19]}<br>
+                <strong>Status:</strong> <span class='status-sent'>{log['status']}</span>
+            </div>
+            """, unsafe_allow_html=True)
     else:
         st.info("No emails sent yet")
 
@@ -779,27 +781,23 @@ elif st.session_state.current_page == 'settings':
     - Daily Limit: {SMTP_CONFIG['daily_limit']} emails
     """)
     
-    st.markdown("### Follow-up Sequence")
-    st.markdown("""
-    - **Day 0:** Initial Proposal Email
-    - **Day 3:** First Follow-up
-    - **Day 7:** Second Follow-up
-    - **Day 14:** Final Follow-up
-    """)
+    st.markdown("### Campaign Settings")
+    new_limit = st.number_input("Daily Email Limit", min_value=10, max_value=200, value=SMTP_CONFIG['daily_limit'])
+    if st.button("Update Limit"):
+        SMTP_CONFIG['daily_limit'] = new_limit
+        st.success(f"Daily limit updated to {new_limit}")
     
     st.markdown("### Data Management")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Clear All Leads", type="secondary"):
-            st.session_state.leads = []
-            save_leads()
-            st.success("All leads cleared")
-            st.rerun()
-    with col2:
-        if st.button("Reset Email Counter", type="secondary"):
-            SMTP_CONFIG["sent_today"] = 0
-            st.success("Email counter reset")
+    if st.button("Clear All Data", type="secondary"):
+        st.session_state.leads = []
+        st.session_state.email_log = []
+        st.session_state.letter_queue = []
+        st.session_state.batch_results = []
+        save_leads()
+        save_email_log()
+        st.success("All data cleared")
+        st.rerun()
 
 # ============ FOOTER ============
 st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
-st.caption("2024 TechWokx Lead Intelligence | hello@techwokx.online | +233 555 087 407")
+st.caption("2024 TechWokx Lead Intelligence | Batch Search | Email Automation | Campaign Tracking")
