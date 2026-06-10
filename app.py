@@ -39,8 +39,6 @@ if 'letter_queue' not in st.session_state:
     st.session_state.letter_queue = []
 if 'selected_company' not in st.session_state:
     st.session_state.selected_company = None
-if 'search_history' not in st.session_state:
-    st.session_state.search_history = []
 
 # ============ FILE STORAGE ============
 os.makedirs("data", exist_ok=True)
@@ -112,7 +110,7 @@ def get_api_keys():
     except:
         return {"google_maps": "", "serp_api": ""}
 
-# ============ ALL 16 REGIONS OF GHANA WITH TOWNS ============
+# ============ ALL 16 REGIONS OF GHANA ============
 ALL_LOCATIONS = {
     "Greater Accra Region": {
         "Accra Metropolitan": ["Airport Residential", "Cantonments", "Labone", "Osu", "Ring Road Central", "Ridge", "North Ridge", "Adabraka", "Kaneshie", "Achimota", "Legon", "Madina", "Adenta", "East Legon", "West Legon", "Dzorwulu", "Labadi", "Teshie", "Nungua", "Spintex", "Sakumono", "Ashaiman", "Tema"],
@@ -181,7 +179,7 @@ ALL_LOCATIONS = {
     }
 }
 
-# ============ SEARCH QUERIES BY CATEGORY ============
+# ============ SEARCH QUERIES ============
 SEARCH_QUERIES = {
     "Hotels": "hotel",
     "SMEs": "small business company",
@@ -193,15 +191,6 @@ SEARCH_QUERIES = {
     "Supermarkets": "supermarket",
     "Pharmaceuticals": "pharmacy drug store",
     "Insurance": "insurance company",
-    "Real Estate": "real estate agency",
-    "Tech Companies": "technology IT company",
-    "Law Firms": "law firm solicitor",
-    "Accounting Firms": "accounting firm",
-    "Construction": "construction company",
-    "Logistics": "logistics shipping company",
-    "Automotive": "car dealer auto repair",
-    "Fashion": "fashion boutique clothing store",
-    "Fitness": "gym fitness center"
 }
 
 # ============ QR CODE GENERATION ============
@@ -217,82 +206,108 @@ def generate_qr_code_base64(url):
     except:
         return ""
 
-# ============ REAL GOOGLE PLACES API ============
-def search_google_places(api_key, query, location):
-    """Search for real businesses using Google Places API"""
-    if not api_key:
-        return []
+# ============ FIXED PROPOSAL DISPLAY (Plain Text with Markdown) ============
+def display_proposal(company_name):
+    """Display proposal as formatted markdown (not raw HTML)"""
+    audit_url = "https://techwokx.online/#audit"
+    qr_base64 = generate_qr_code_base64(audit_url)
     
-    try:
-        # First, geocode the location to get coordinates
-        geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
-        geocode_params = {
-            "key": api_key,
-            "address": f"{location}, Ghana"
-        }
-        geocode_response = requests.get(geocode_url, params=geocode_params, timeout=10)
-        geocode_data = geocode_response.json()
-        
-        if not geocode_data.get('results'):
-            return []
-        
-        lat = geocode_data['results'][0]['geometry']['location']['lat']
-        lng = geocode_data['results'][0]['geometry']['location']['lng']
-        
-        # Search for places
-        places_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-        places_params = {
-            "key": api_key,
-            "location": f"{lat},{lng}",
-            "radius": 5000,
-            "keyword": query,
-            "type": "establishment"
-        }
-        
-        response = requests.get(places_url, params=places_params, timeout=10)
-        data = response.json()
-        
-        businesses = []
-        for place in data.get('results', [])[:20]:
-            # Get detailed place information
-            details_url = "https://maps.googleapis.com/maps/api/place/details/json"
-            details_params = {
-                "key": api_key,
-                "place_id": place['place_id'],
-                "fields": "name,formatted_address,formatted_phone_number,website,rating"
-            }
-            details_response = requests.get(details_url, params=details_params, timeout=10)
-            details = details_response.json().get('result', {})
-            
-            # Extract website domain for email
-            website = details.get('website', '')
-            email = ""
-            if website:
-                try:
-                    ext = tldextract.extract(website)
-                    domain = f"{ext.domain}.{ext.suffix}"
-                    email = f"info@{domain}"
-                except:
-                    pass
-            
-            businesses.append({
-                "name": place.get('name'),
-                "address": details.get('formatted_address', place.get('vicinity', '')),
-                "phone": details.get('formatted_phone_number', ''),
-                "website": website,
-                "email": email,
-                "rating": details.get('rating', 0),
-                "place_id": place.get('place_id')
-            })
-        
-        return businesses
-    except Exception as e:
-        st.warning(f"Google Places API error: {e}")
-        return []
+    st.markdown(f"""
+    ## 🔍 TechWokx IT Solutions
+    ### FREE 5-Step Email & IT Health Check
+    
+    ---
+    
+    **Dear Sir/Madam,**
+    
+    I hope this letter finds you well.
+    
+    My name is **George Jabley**, and I represent **TechWokx IT Solutions**. We help businesses improve their technology operations through reliable email systems, IT support, backup solutions, infrastructure reviews, and business continuity planning.
+    
+    As part of our business outreach program, we conducted a high-level review of your organization's publicly available digital presence, including your website, domain configuration, SSL certificate status, and email setup.
+    
+    ---
+    
+    ### 📋 What We Observed
+    
+    - We were unable to verify whether all recommended email authentication records (SPF/DKIM/DMARC) are fully configured.
+    - Your company logo does not currently appear alongside emails in supported inboxes.
+    - There may be opportunities to improve email deliverability and trust indicators.
+    - We could not verify the existence of backup and recovery measures protecting business-critical communications and data.
+    - Potential printer and network issues that could be causing daily operational friction.
+    
+    *Please note that this review was conducted using publicly available information and from outside your network environment. As such, some findings may already have been addressed internally, and a more detailed assessment would be required to confirm their status.*
+    
+    ---
+    
+    ### ⚠️ Why This Matters
+    
+    Modern businesses rely heavily on email, cloud services, and digital communication. When these systems are not properly configured or maintained, organizations may experience:
+    
+    - Emails being delivered to spam or junk folders
+    - Reduced trust in business communications
+    - Difficulty identifying fraudulent communications
+    - Loss of important business data
+    - Increased downtime during technical issues
+    - Challenges recovering from accidental deletions or system failures
+    - Printer and network disruptions affecting productivity
+    
+    ---
+    
+    ### 🛠️ How TechWokx Can Help
+    
+    We provide practical technology solutions designed to improve reliability, productivity, and business continuity.
+    
+    **Our services include:**
+    - ✓ Business Email Health Checks
+    - ✓ Email Deliverability Improvements
+    - ✓ Professional Email Branding & Signatures
+    - ✓ IT Infrastructure Reviews
+    - ✓ Managed IT Support Services
+    - ✓ Printer & Network Troubleshooting
+    - ✓ Backup & Recovery Solutions
+    - ✓ Cloud Productivity Solutions
+    - ✓ Process Automation
+    
+    ---
+    
+    ### 🎁 TWO COMPLIMENTARY OFFERS
+    
+    **1. Find Out Yourself: 5-Step Email & IT Health Check**
+    
+    To receive your complimentary assessment:
+    
+    **Visit:** [techwokx.online/#audit]({audit_url})
+    
+    The assessment takes less than five minutes and provides:
+    - A personalized technology health score
+    - Email configuration insights
+    - Security recommendations
+    
+    **2. Free 15-Minute IT Consultation**
+    
+    Discuss your specific challenges and get expert advice at no cost.
+    
+    ---
+    
+    Thank you for your time and consideration. We would be delighted to help **{company_name}** achieve smoother, more secure, and more reliable IT operations.
+    
+    **Warm regards,**
+    
+    **George Jabley**  
+    Founder & IT Operations Lead  
+    TechWokx Ghana  
+    📞 +233 555 087 407  
+    📧 hello@techwokx.online  
+    🌐 techwokx.online
+    
+    ---
+    *© 2024 TechWokx IT Solutions | Intelligent Solutions. Secure Futures.*
+    *P.O. Box ML469, Malam, Accra, Ghana*
+    """, unsafe_allow_html=True)
 
-# ============ PROFESSIONAL PROPOSAL TEMPLATE ============
-def get_proposal_html(company_name):
-    """Return the professional proposal as HTML"""
+def get_email_body(company_name):
+    """Generate email body (HTML for email clients)"""
     audit_url = "https://techwokx.online/#audit"
     qr_base64 = generate_qr_code_base64(audit_url)
     
@@ -303,111 +318,41 @@ def get_proposal_html(company_name):
         <meta charset="UTF-8">
         <title>TechWokx IT Assessment</title>
         <style>
-            body {{ font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #1e293b; margin: 0; padding: 0; background: #f0f4f8; }}
-            .container {{ max-width: 700px; margin: 20px auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -12px rgba(0,0,0,0.1); }}
-            .header {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 30px; text-align: center; }}
-            .header h1 {{ margin: 0; font-size: 24px; }}
-            .content {{ padding: 30px; }}
-            .section {{ margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid #e2e8f0; }}
-            .section-title {{ font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 15px; padding-left: 12px; border-left: 3px solid #667eea; }}
-            .observation-box {{ background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 15px 0; border-radius: 8px; }}
-            .service-list {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0; }}
-            .service-tag {{ background: #e0e7ff; color: #4338ca; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }}
-            .offer-box {{ background: linear-gradient(135deg, #dbeafe, #ede9fe); border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0; }}
-            .qr-code {{ text-align: center; margin: 20px 0; }}
-            .qr-code img {{ width: 150px; height: 150px; border: 2px solid #e2e8f0; border-radius: 12px; padding: 10px; background: white; }}
-            .button {{ background: #22c55e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; }}
-            .footer {{ background: #1e293b; color: #94a3b8; padding: 20px; text-align: center; font-size: 12px; }}
-            .signature {{ margin-top: 25px; padding-top: 20px; border-top: 1px solid #e2e8f0; }}
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: #667eea; color: white; padding: 20px; text-align: center; }}
+            .content {{ padding: 20px; }}
+            .footer {{ background: #f0f0f0; padding: 15px; text-align: center; font-size: 12px; }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>🔍 TechWokx IT Solutions</h1>
+                <h2>TechWokx IT Solutions</h2>
                 <p>FREE 5-Step Email & IT Health Check</p>
             </div>
             <div class="content">
                 <p>Dear Sir/Madam,</p>
                 <p>I hope this letter finds you well.</p>
-                <p>My name is <strong>George Jabley</strong>, and I represent <strong>TechWokx IT Solutions</strong>. We help businesses improve their technology operations through reliable email systems, IT support, backup solutions, infrastructure reviews, and business continuity planning.</p>
-                <p>As part of our business outreach program, we conducted a high-level review of your organization's publicly available digital presence, including your website, domain configuration, SSL certificate status, and email setup.</p>
-                
-                <div class="section">
-                    <div class="section-title">📋 What We Observed</div>
-                    <div class="observation-box">
-                        <ul>
-                            <li>We were unable to verify whether all recommended email authentication records are fully configured.</li>
-                            <li>Your company logo does not currently appear alongside emails in supported inboxes.</li>
-                            <li>There may be opportunities to improve email deliverability and trust indicators.</li>
-                            <li>We could not verify the existence of backup and recovery measures protecting business-critical communications and data.</li>
-                            <li>Potential printer and network issues that could be causing daily operational friction.</li>
-                        </ul>
-                    </div>
-                    <p><em>Please note that this review was conducted using publicly available information and from outside your network environment. As such, some findings may already have been addressed internally, and a more detailed assessment would be required to confirm their status.</em></p>
-                </div>
-                
-                <div class="section">
-                    <div class="section-title">⚠️ Why This Matters</div>
-                    <p>Modern businesses rely heavily on email, cloud services, and digital communication. When these systems are not properly configured or maintained, organizations may experience:</p>
-                    <ul>
-                        <li>Emails being delivered to spam or junk folders</li>
-                        <li>Reduced trust in business communications</li>
-                        <li>Difficulty identifying fraudulent communications</li>
-                        <li>Loss of important business data</li>
-                        <li>Increased downtime during technical issues</li>
-                        <li>Challenges recovering from accidental deletions or system failures</li>
-                        <li>Printer and network disruptions affecting productivity</li>
-                    </ul>
-                </div>
-                
-                <div class="section">
-                    <div class="section-title">🛠️ How TechWokx Can Help</div>
-                    <p>We provide practical technology solutions designed to improve reliability, productivity, and business continuity.</p>
-                    <div class="service-list">
-                        <span class="service-tag">✓ Business Email Health Checks</span>
-                        <span class="service-tag">✓ Email Deliverability Improvements</span>
-                        <span class="service-tag">✓ Professional Email Branding & Signatures</span>
-                        <span class="service-tag">✓ IT Infrastructure Reviews</span>
-                        <span class="service-tag">✓ Managed IT Support Services</span>
-                        <span class="service-tag">✓ Printer & Network Troubleshooting</span>
-                        <span class="service-tag">✓ Backup & Recovery Solutions</span>
-                        <span class="service-tag">✓ Cloud Productivity Solutions</span>
-                        <span class="service-tag">✓ Process Automation</span>
-                    </div>
-                </div>
-                
-                <div class="offer-box">
-                    <div class="section-title" style="border-left-color: #22c55e;">🎁 TWO COMPLIMENTARY OFFERS</div>
-                    <p><strong>1. Find Out Yourself: 5-Step Email & IT Health Check</strong></p>
-                    <div class="qr-code">
-                        <img src="data:image/png;base64,{qr_base64}" alt="QR Code">
-                    </div>
-                    <p><strong>Or visit:</strong> <a href="{audit_url}" target="_blank">techwokx.online/#audit</a></p>
-                    <p>The assessment takes less than five minutes and provides:</p>
-                    <ul style="text-align: left;">
-                        <li>A personalized technology health score</li>
-                        <li>Email configuration insights</li>
-                        <li>Security recommendations</li>
-                    </ul>
-                    <p><strong>2. Free 15-Minute IT Consultation</strong></p>
-                    <p>Discuss your specific challenges and get expert advice at no cost.</p>
-                </div>
-                
-                <div class="signature">
-                    <p>Thank you for your time and consideration. We would be delighted to help <strong>{company_name}</strong> achieve smoother, more secure, and more reliable IT operations.</p>
-                    <p>Warm regards,</p>
-                    <p><strong>George Jabley</strong><br>
-                    Founder & IT Operations Lead<br>
-                    TechWokx Ghana<br>
-                    📞 +233 555 087 407<br>
-                    📧 hello@techwokx.online<br>
-                    🌐 techwokx.online</p>
-                </div>
+                <p>My name is <strong>George Jabley</strong>, and I represent <strong>TechWokx IT Solutions</strong>.</p>
+                <p>As part of our business outreach program, we conducted a high-level review of your organization's digital presence.</p>
+                <h3>What We Observed</h3>
+                <ul>
+                    <li>Email authentication records may need configuration</li>
+                    <li>Email deliverability could be improved</li>
+                    <li>Backup and recovery measures need verification</li>
+                </ul>
+                <h3>Two Complimentary Offers</h3>
+                <p><strong>1. 5-Step Email & IT Health Check</strong><br>
+                Visit: <a href="{audit_url}">techwokx.online/#audit</a></p>
+                <p><strong>2. Free 15-Minute IT Consultation</strong><br>
+                Call: +233 555 087 407</p>
+                <p>Best regards,<br>
+                George Jabley<br>
+                TechWokx Ghana</p>
             </div>
             <div class="footer">
-                <p>© 2024 TechWokx IT Solutions | Intelligent Solutions. Secure Futures.</p>
-                <p>P.O. Box ML469, Malam, Accra, Ghana</p>
+                <p>© 2024 TechWokx IT Solutions | P.O. Box ML469, Malam, Accra, Ghana</p>
             </div>
         </div>
     </body>
@@ -435,62 +380,18 @@ Dear Sir/Madam,
 
 I hope this letter finds you well.
 
-My name is George Jabley, and I represent TechWokx IT Solutions. We help businesses 
-improve their technology operations through reliable email systems, IT support, 
-backup solutions, infrastructure reviews, and business continuity planning.
-
-As part of our business outreach program, we conducted a high-level review of your 
-organization's publicly available digital presence.
+My name is George Jabley, and I represent TechWokx IT Solutions.
 
 ================================================================================
                           WHAT WE OBSERVED
 ================================================================================
 
-• We were unable to verify whether all recommended email authentication records 
-  (SPF/DKIM/DMARC) are fully configured.
-
-• Your company logo does not currently appear alongside emails in supported inboxes.
-
-• There may be opportunities to improve email deliverability and trust indicators.
-
-• We could not verify the existence of backup and recovery measures protecting 
-  business-critical communications and data.
-
-• Potential printer and network issues that could be causing daily operational friction.
-
-Note: This review was conducted using publicly available information from outside 
-your network environment. Some findings may already have been addressed internally.
+• Email authentication records may need configuration
+• Email deliverability could be improved
+• Backup and recovery measures need verification
 
 ================================================================================
-                          WHY THIS MATTERS
-================================================================================
-
-Modern businesses rely heavily on email, cloud services, and digital communication. 
-When systems are not properly configured, organizations may experience:
-• Emails delivered to spam or junk folders
-• Reduced trust in business communications
-• Difficulty identifying fraudulent communications
-• Loss of important business data
-• Increased downtime during technical issues
-• Printer and network disruptions affecting productivity
-
-================================================================================
-                         HOW TECHWOKX CAN HELP
-================================================================================
-
-Our services include:
-✓ Business Email Health Checks
-✓ Email Deliverability Improvements
-✓ Professional Email Branding & Signatures
-✓ IT Infrastructure Reviews
-✓ Managed IT Support Services
-✓ Printer & Network Troubleshooting
-✓ Backup & Recovery Solutions
-✓ Cloud Productivity Solutions
-✓ Process Automation
-
-================================================================================
-                    TWO (2) COMPLIMENTARY OFFERS
+                    TWO COMPLIMENTARY OFFERS
 ================================================================================
 
 1. 5-Step Email & IT Health Check
@@ -501,8 +402,6 @@ Our services include:
 
 ================================================================================
 
-Thank you for your time and consideration.
-
 Warm regards,
 
 George Jabley
@@ -510,12 +409,78 @@ Founder & IT Operations Lead
 TechWokx Ghana
 📞 +233 555 087 407
 📧 hello@techwokx.online
-🌐 techwokx.online
-
-P.O. Box ML469, Malam, Accra, Ghana
 
 ================================================================================
 """
+
+# ============ GOOGLE PLACES API ============
+def search_google_places(api_key, query, location):
+    """Search for real businesses using Google Places API"""
+    if not api_key:
+        return []
+    
+    try:
+        geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+        geocode_params = {
+            "key": api_key,
+            "address": f"{location}, Ghana"
+        }
+        geocode_response = requests.get(geocode_url, params=geocode_params, timeout=10)
+        geocode_data = geocode_response.json()
+        
+        if not geocode_data.get('results'):
+            return []
+        
+        lat = geocode_data['results'][0]['geometry']['location']['lat']
+        lng = geocode_data['results'][0]['geometry']['location']['lng']
+        
+        places_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+        places_params = {
+            "key": api_key,
+            "location": f"{lat},{lng}",
+            "radius": 5000,
+            "keyword": query,
+            "type": "establishment"
+        }
+        
+        response = requests.get(places_url, params=places_params, timeout=10)
+        data = response.json()
+        
+        businesses = []
+        for place in data.get('results', [])[:20]:
+            details_url = "https://maps.googleapis.com/maps/api/place/details/json"
+            details_params = {
+                "key": api_key,
+                "place_id": place['place_id'],
+                "fields": "name,formatted_address,formatted_phone_number,website,rating"
+            }
+            details_response = requests.get(details_url, params=details_params, timeout=10)
+            details = details_response.json().get('result', {})
+            
+            website = details.get('website', '')
+            email = ""
+            if website:
+                try:
+                    ext = tldextract.extract(website)
+                    domain = f"{ext.domain}.{ext.suffix}"
+                    email = f"info@{domain}"
+                except:
+                    pass
+            
+            businesses.append({
+                "name": place.get('name'),
+                "address": details.get('formatted_address', place.get('vicinity', '')),
+                "phone": details.get('formatted_phone_number', ''),
+                "website": website,
+                "email": email,
+                "rating": details.get('rating', 0),
+                "place_id": place.get('place_id')
+            })
+        
+        return businesses
+    except Exception as e:
+        st.warning(f"Google Places API error: {e}")
+        return []
 
 # ============ EMAIL FUNCTIONS ============
 def send_email(to_email, subject, body):
@@ -557,9 +522,6 @@ def add_lead(lead_data):
         "website": lead_data.get("website", ""),
         "email": lead_data.get("email", ""),
         "category": lead_data.get("category", ""),
-        "region": lead_data.get("region", ""),
-        "district": lead_data.get("district", ""),
-        "town": lead_data.get("town", ""),
         "rating": lead_data.get("rating", 0),
         "lead_score": 75,
         "created_at": datetime.now().isoformat(),
@@ -584,7 +546,7 @@ st.markdown("""
 .section-header { color: #0f172a; font-size: 1.2rem; font-weight: 600; border-left: 3px solid #667eea; padding-left: 1rem; margin: 1rem 0; }
 .custom-divider { height: 1px; background: #e2e8f0; margin: 1rem 0; }
 .stButton > button { background: linear-gradient(135deg, #667eea, #764ba2); color: white; font-weight: 600; border: none; border-radius: 8px; }
-.nav-buttons { display: flex; gap: 10px; margin-bottom: 20px; }
+.proposal-container { background: white; border-radius: 12px; padding: 2rem; border: 1px solid #e2e8f0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -662,8 +624,7 @@ if st.session_state.current_page == 'dashboard':
         remaining = SMTP_CONFIG['daily_limit'] - SMTP_CONFIG['sent_today']
         st.markdown(f"<div class='metric-card'><div class='metric-value'>{remaining}</div><div class='metric-label'>Emails Remaining</div></div>", unsafe_allow_html=True)
     with col4:
-        regions_count = len(ALL_LOCATIONS)
-        st.markdown(f"<div class='metric-card'><div class='metric-value'>{regions_count}</div><div class='metric-label'>Regions Covered</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-card'><div class='metric-value'>16</div><div class='metric-label'>Regions</div></div>", unsafe_allow_html=True)
     
     st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
     
@@ -745,7 +706,7 @@ if st.session_state.current_page == 'search':
                 with col2:
                     st.markdown(f"**📧 Email:** {company.get('email', 'N/A')}")
                     st.markdown(f"**⭐ Rating:** {'⭐' * int(company.get('rating', 0))} {company.get('rating', 'N/A')}")
-                    st.markdown(f"**📂 Category:** selected_category")
+                    st.markdown(f"**📂 Category:** {selected_category}")
                 
                 st.markdown("---")
                 
@@ -775,9 +736,9 @@ if st.session_state.current_page == 'search':
                     new_email = st.text_input("Email", value=email, key=f"email_input_{idx}")
                     if st.button("📧 Send Email", key=f"send_{idx}"):
                         if new_email:
-                            proposal_html = get_proposal_html(company['name'])
+                            email_body = get_email_body(company['name'])
                             subject = f"FREE 5-Step Email & IT Health Check - For {company['name']}"
-                            success, msg = send_email(new_email, subject, proposal_html)
+                            success, msg = send_email(new_email, subject, email_body)
                             if success:
                                 st.success(f"Email sent to {company['name']}")
                                 st.session_state.email_log.append({
@@ -813,8 +774,10 @@ elif st.session_state.current_page == 'proposal_preview' and st.session_state.se
     
     col1, col2 = st.columns([2, 1])
     with col1:
-        proposal_html = get_proposal_html(company['name'])
-        st.markdown(proposal_html, unsafe_allow_html=True)
+        with st.container():
+            st.markdown('<div class="proposal-container">', unsafe_allow_html=True)
+            display_proposal(company['name'])
+            st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
         st.markdown("### Company Details")
@@ -846,9 +809,9 @@ elif st.session_state.current_page == 'proposal_preview' and st.session_state.se
         email_input = st.text_input("Email Address", value=email)
         if st.button("📧 Send Email", use_container_width=True):
             if email_input:
-                proposal_html = get_proposal_html(company['name'])
+                email_body = get_email_body(company['name'])
                 subject = f"FREE 5-Step Email & IT Health Check - For {company['name']}"
-                success, msg = send_email(email_input, subject, proposal_html)
+                success, msg = send_email(email_input, subject, email_body)
                 if success:
                     st.success(f"Email sent to {company['name']}")
                     st.session_state.email_log.append({
@@ -923,9 +886,9 @@ elif st.session_state.current_page == 'crm':
                         new_email = st.text_input("Email", value=email, key=f"email_crm_{lead['id']}")
                         if st.button(f"📧 Send Email", key=f"send_{lead['id']}"):
                             if new_email:
-                                proposal_html = get_proposal_html(lead['name'])
+                                email_body = get_email_body(lead['name'])
                                 subject = f"FREE 5-Step Email & IT Health Check - For {lead['name']}"
-                                success, msg = send_email(new_email, subject, proposal_html)
+                                success, msg = send_email(new_email, subject, email_body)
                                 if success:
                                     lead['email_sent'] = True
                                     save_leads()
