@@ -268,9 +268,12 @@ def search_google_places(api_key, query, location):
             website = details.get('website', '')
             email = ""
             if website:
-                ext = tldextract.extract(website)
-                domain = f"{ext.domain}.{ext.suffix}"
-                email = f"info@{domain}"
+                try:
+                    ext = tldextract.extract(website)
+                    domain = f"{ext.domain}.{ext.suffix}"
+                    email = f"info@{domain}"
+                except:
+                    pass
             
             businesses.append({
                 "name": place.get('name'),
@@ -582,8 +585,6 @@ st.markdown("""
 .custom-divider { height: 1px; background: #e2e8f0; margin: 1rem 0; }
 .stButton > button { background: linear-gradient(135deg, #667eea, #764ba2); color: white; font-weight: 600; border: none; border-radius: 8px; }
 .nav-buttons { display: flex; gap: 10px; margin-bottom: 20px; }
-.company-card { background: white; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; border: 1px solid #e2e8f0; cursor: pointer; transition: all 0.2s; }
-.company-card:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -682,7 +683,7 @@ if st.session_state.current_page == 'dashboard':
             st.markdown(f"<div class='data-card'><strong>{lead['name']}</strong><br>Added: {lead['created_at'][:10]}</div>", unsafe_allow_html=True)
 
 # ============ SEARCH COMPANIES ============
-elif st.session_state.current_page == 'search':
+if st.session_state.current_page == 'search':
     st.markdown('<div class="section-header">🔍 Search Companies</div>', unsafe_allow_html=True)
     st.caption("Find real businesses across all 16 regions of Ghana using Google Places API")
     st.markdown("---")
@@ -692,340 +693,334 @@ elif st.session_state.current_page == 'search':
     if not api_keys["google_maps"]:
         st.error("❌ Google Maps API key not configured!")
         st.info("Add GOOGLE_MAPS_API_KEY to .streamlit/secrets.toml")
-        st.markdown("""
-        ```toml
-        GOOGLE_MAPS_API_KEY = "your_key_here"
-""")
-st.stop()
+        st.stop()
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        regions = list(ALL_LOCATIONS.keys())
+        selected_region = st.selectbox("Select Region", regions)
+    
+    with col2:
+        if selected_region:
+            districts = list(ALL_LOCATIONS[selected_region].keys())
+            selected_district = st.selectbox("Select District/Metropolis", districts)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if selected_region and selected_district:
+            towns = ALL_LOCATIONS[selected_region][selected_district]
+            selected_town = st.selectbox("Select Town/City", towns)
+    
+    with col2:
+        categories = list(SEARCH_QUERIES.keys())
+        selected_category = st.selectbox("Business Category", categories)
+    
+    limit = st.slider("Number of Companies", 5, 30, 15)
+    
+    if st.button("🔍 Search", type="primary"):
+        if selected_town:
+            with st.spinner(f"Searching for {selected_category} in {selected_town}..."):
+                query = SEARCH_QUERIES.get(selected_category, selected_category)
+                businesses = search_google_places(api_keys["google_maps"], query, selected_town)
+                
+                for biz in businesses:
+                    biz["category"] = selected_category
+                    biz["town"] = selected_town
+                    biz["district"] = selected_district
+                    biz["region"] = selected_region
+                
+                st.session_state.batch_results = businesses[:limit]
+                st.success(f"Found {len(businesses)} businesses in {selected_town}")
+    
+    if st.session_state.batch_results:
+        st.markdown("### Search Results")
+        
+        for idx, company in enumerate(st.session_state.batch_results):
+            with st.expander(f"🏢 {company['name']}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown(f"**📍 Address:** {company.get('address', 'N/A')}")
+                    st.markdown(f"**📞 Phone:** {company.get('phone', 'N/A')}")
+                    st.markdown(f"**🌐 Website:** {company.get('website', 'N/A')}")
+                with col2:
+                    st.markdown(f"**📧 Email:** {company.get('email', 'N/A')}")
+                    st.markdown(f"**⭐ Rating:** {'⭐' * int(company.get('rating', 0))} {company.get('rating', 'N/A')}")
+                    st.markdown(f"**📂 Category:** selected_category")
+                
+                st.markdown("---")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    if st.button("📝 View Proposal", key=f"view_{idx}"):
+                        st.session_state.selected_company = company
+                        st.session_state.current_page = 'proposal_preview'
+                        st.rerun()
+                
+                with col2:
+                    if st.button("➕ Add to CRM", key=f"add_{idx}"):
+                        if add_lead(company):
+                            st.success(f"Added {company['name']} to CRM")
+                            st.rerun()
+                        else:
+                            st.warning("Company already exists in CRM")
+                
+                with col3:
+                    email = company.get('email', '')
+                    if not email and company.get('website'):
+                        try:
+                            ext = tldextract.extract(company['website'])
+                            email = f"info@{ext.domain}.{ext.suffix}"
+                        except:
+                            pass
+                    new_email = st.text_input("Email", value=email, key=f"email_input_{idx}")
+                    if st.button("📧 Send Email", key=f"send_{idx}"):
+                        if new_email:
+                            proposal_html = get_proposal_html(company['name'])
+                            subject = f"FREE 5-Step Email & IT Health Check - For {company['name']}"
+                            success, msg = send_email(new_email, subject, proposal_html)
+                            if success:
+                                st.success(f"Email sent to {company['name']}")
+                                st.session_state.email_log.append({
+                                    "to": new_email,
+                                    "company": company['name'],
+                                    "subject": subject,
+                                    "date": datetime.now().isoformat(),
+                                    "status": "Sent"
+                                })
+                                save_email_log()
+                                st.rerun()
+                            else:
+                                st.error(f"Failed: {msg}")
+                        else:
+                            st.warning("Please enter an email address")
+                
+                with col4:
+                    if st.button("📄 Download Letter", key=f"letter_{idx}"):
+                        letter = get_letter_content(company['name'])
+                        st.download_button(
+                            label="Download",
+                            data=letter,
+                            file_name=f"letter_{company['name'].replace(' ', '_')}.txt",
+                            mime="text/plain",
+                            key=f"download_{idx}"
+                        )
 
-col1, col2 = st.columns(2)
-with col1:
-regions = list(ALL_LOCATIONS.keys())
-selected_region = st.selectbox("Select Region", regions)
-
-with col2:
-if selected_region:
-districts = list(ALL_LOCATIONS[selected_region].keys())
-selected_district = st.selectbox("Select District/Metropolis", districts)
-
-col1, col2 = st.columns(2)
-with col1:
-if selected_region and selected_district:
-towns = ALL_LOCATIONS[selected_region][selected_district]
-selected_town = st.selectbox("Select Town/City", towns)
-
-with col2:
-categories = list(SEARCH_QUERIES.keys())
-selected_category = st.selectbox("Business Category", categories)
-
-limit = st.slider("Number of Companies", 5, 30, 15)
-
-if st.button("🔍 Search", type="primary"):
-if selected_town:
-with st.spinner(f"Searching for {selected_category} in {selected_town}..."):
-query = SEARCH_QUERIES.get(selected_category, selected_category)
-businesses = search_google_places(api_keys["google_maps"], query, selected_town)
-
-for biz in businesses:
-biz["category"] = selected_category
-biz["town"] = selected_town
-biz["district"] = selected_district
-biz["region"] = selected_region
-
-st.session_state.batch_results = businesses[:limit]
-st.success(f"Found {len(businesses)} businesses in {selected_town}")
-
-Save to search history
-st.session_state.search_history.append({
-"region": selected_region,
-"district": selected_district,
-"town": selected_town,
-"category": selected_category,
-"count": len(businesses),
-"date": datetime.now().isoformat()
-})
-
-if st.session_state.batch_results:
-st.markdown("### Search Results")
-
-for idx, company in enumerate(st.session_state.batch_results):
-with st.expander(f"🏢 {company['name']}"):
-col1, col2 = st.columns(2)
-with col1:
-st.markdown(f"📍 Address: {company.get('address', 'N/A')}")
-st.markdown(f"📞 Phone: {company.get('phone', 'N/A')}")
-st.markdown(f"🌐 Website: {company.get('website', 'N/A')}")
-with col2:
-st.markdown(f"📧 Email: {company.get('email', 'N/A')}")
-st.markdown(f"⭐ Rating: {'⭐' * int(company.get('rating', 0))} {company.get('rating', 'N/A')}")
-st.markdown(f"📂 Category: {selected_category}")
-
-st.markdown("---")
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-if st.button("📝 View Proposal", key=f"view_{idx}"):
-st.session_state.selected_company = company
-st.session_state.current_page = 'proposal_preview'
-st.rerun()
-
-with col2:
-if st.button("➕ Add to CRM", key=f"add_{idx}"):
-if add_lead(company):
-st.success(f"Added {company['name']} to CRM")
-st.rerun()
-else:
-st.warning("Company already exists in CRM")
-
-with col3:
-email = company.get('email', '')
-if not email and company.get('website'):
-ext = tldextract.extract(company['website'])
-email = f"info@{ext.domain}.{ext.suffix}"
-new_email = st.text_input("Email", value=email, key=f"email_input_{idx}")
-if st.button("📧 Send Email", key=f"send_{idx}"):
-if new_email:
-proposal_html = get_proposal_html(company['name'])
-subject = f"FREE 5-Step Email & IT Health Check - For {company['name']}"
-success, msg = send_email(new_email, subject, proposal_html)
-if success:
-st.success(f"Email sent to {company['name']}")
-st.session_state.email_log.append({
-"to": new_email,
-"company": company['name'],
-"subject": subject,
-"date": datetime.now().isoformat(),
-"status": "Sent"
-})
-save_email_log()
-st.rerun()
-else:
-st.error(f"Failed: {msg}")
-else:
-st.warning("Please enter an email address")
-
-with col4:
-if st.button("📄 Download Letter", key=f"letter_{idx}"):
-letter = get_letter_content(company['name'])
-st.download_button(
-label="Download",
-data=letter,
-file_name=f"letter_{company['name'].replace(' ', '')}.txt",
-mime="text/plain",
-key=f"download{idx}"
-)
-
-============ PROPOSAL PREVIEW ============
+# ============ PROPOSAL PREVIEW ============
 elif st.session_state.current_page == 'proposal_preview' and st.session_state.selected_company:
-company = st.session_state.selected_company
+    company = st.session_state.selected_company
+    
+    st.markdown(f'<div class="section-header">📄 Proposal for {company["name"]}</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        proposal_html = get_proposal_html(company['name'])
+        st.markdown(proposal_html, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("### Company Details")
+        st.markdown(f"**Name:** {company['name']}")
+        st.markdown(f"**Address:** {company.get('address', 'N/A')}")
+        st.markdown(f"**Phone:** {company.get('phone', 'N/A')}")
+        st.markdown(f"**Website:** {company.get('website', 'N/A')}")
+        st.markdown(f"**Email:** {company.get('email', 'N/A')}")
+        st.markdown(f"**Category:** {company.get('category', 'N/A')}")
+        st.markdown(f"**Rating:** {'⭐' * int(company.get('rating', 0))} {company.get('rating', 'N/A')}")
+        
+        st.markdown("---")
+        st.markdown("### Actions")
+        
+        if st.button("➕ Add to CRM", use_container_width=True):
+            if add_lead(company):
+                st.success(f"Added {company['name']} to CRM")
+            else:
+                st.warning("Company already exists in CRM")
+        
+        email = company.get('email', '')
+        if not email and company.get('website'):
+            try:
+                ext = tldextract.extract(company['website'])
+                email = f"info@{ext.domain}.{ext.suffix}"
+            except:
+                pass
+        
+        email_input = st.text_input("Email Address", value=email)
+        if st.button("📧 Send Email", use_container_width=True):
+            if email_input:
+                proposal_html = get_proposal_html(company['name'])
+                subject = f"FREE 5-Step Email & IT Health Check - For {company['name']}"
+                success, msg = send_email(email_input, subject, proposal_html)
+                if success:
+                    st.success(f"Email sent to {company['name']}")
+                    st.session_state.email_log.append({
+                        "to": email_input,
+                        "company": company['name'],
+                        "subject": subject,
+                        "date": datetime.now().isoformat(),
+                        "status": "Sent"
+                    })
+                    save_email_log()
+                else:
+                    st.error(f"Failed: {msg}")
+            else:
+                st.warning("Please enter an email address")
+        
+        if st.button("📄 Download Letter", use_container_width=True):
+            letter = get_letter_content(company['name'])
+            st.download_button(
+                label="Download Letter",
+                data=letter,
+                file_name=f"letter_{company['name'].replace(' ', '_')}.txt",
+                mime="text/plain"
+            )
+        
+        if st.button("← Back to Search Results", use_container_width=True):
+            st.session_state.current_page = 'search'
+            st.rerun()
 
-st.markdown(f'<div class="section-header">📄 Proposal for {company["name"]}</div>', unsafe_allow_html=True)
-
-Navigation buttons
-st.markdown("""
-
-<div style="display: flex; gap: 10px; margin-bottom: 20px;"> <button onclick="history.back()" style="background: #667eea; color: white; padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer;">← Back to Search</button> <button onclick="window.location.href='?page=dashboard'" style="background: #64748b; color: white; padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer;">🏠 Home</button> </div> """, unsafe_allow_html=True)
-col1, col2 = st.columns([2, 1])
-with col1:
-proposal_html = get_proposal_html(company['name'])
-st.markdown(proposal_html, unsafe_allow_html=True)
-
-with col2:
-st.markdown("### Company Details")
-st.markdown(f"Name: {company['name']}")
-st.markdown(f"Address: {company.get('address', 'N/A')}")
-st.markdown(f"Phone: {company.get('phone', 'N/A')}")
-st.markdown(f"Website: {company.get('website', 'N/A')}")
-st.markdown(f"Email: {company.get('email', 'N/A')}")
-st.markdown(f"Category: {company.get('category', 'N/A')}")
-st.markdown(f"Rating: {'⭐' * int(company.get('rating', 0))} {company.get('rating', 'N/A')}")
-
-st.markdown("---")
-st.markdown("### Actions")
-
-if st.button("➕ Add to CRM", use_container_width=True):
-if add_lead(company):
-st.success(f"Added {company['name']} to CRM")
-else:
-st.warning("Company already exists in CRM")
-
-email = company.get('email', '')
-if not email and company.get('website'):
-ext = tldextract.extract(company['website'])
-email = f"info@{ext.domain}.{ext.suffix}"
-
-email_input = st.text_input("Email Address", value=email)
-if st.button("📧 Send Email", use_container_width=True):
-if email_input:
-proposal_html = get_proposal_html(company['name'])
-subject = f"FREE 5-Step Email & IT Health Check - For {company['name']}"
-success, msg = send_email(email_input, subject, proposal_html)
-if success:
-st.success(f"Email sent to {company['name']}")
-st.session_state.email_log.append({
-"to": email_input,
-"company": company['name'],
-"subject": subject,
-"date": datetime.now().isoformat(),
-"status": "Sent"
-})
-save_email_log()
-else:
-st.error(f"Failed: {msg}")
-else:
-st.warning("Please enter an email address")
-
-if st.button("📄 Download Letter", use_container_width=True):
-letter = get_letter_content(company['name'])
-st.download_button(
-label="Download Letter",
-data=letter,
-file_name=f"letter_{company['name'].replace(' ', '_')}.txt",
-mime="text/plain"
-)
-
-if st.button("← Back to Search Results", use_container_width=True):
-st.session_state.current_page = 'search'
-st.rerun()
-
-============ LEADS CRM ============
+# ============ LEADS CRM ============
 elif st.session_state.current_page == 'crm':
-st.markdown('<div class="section-header">👥 Leads CRM</div>', unsafe_allow_html=True)
-st.caption(f"Total Leads: {len(st.session_state.leads)}")
-st.markdown("---")
+    st.markdown('<div class="section-header">👥 Leads CRM</div>', unsafe_allow_html=True)
+    st.caption(f"Total Leads: {len(st.session_state.leads)}")
+    st.markdown("---")
+    
+    if st.session_state.leads:
+        search = st.text_input("🔍 Search", placeholder="Search by name, address, or category")
+        
+        filtered = st.session_state.leads
+        if search:
+            filtered = [l for l in filtered if search.lower() in l.get('name', '').lower() or search.lower() in l.get('address', '').lower() or search.lower() in l.get('category', '').lower()]
+        
+        for lead in filtered:
+            with st.expander(f"🏢 {lead['name']} - Score: {lead['lead_score']}/100"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown(f"**📍 Address:** {lead.get('address', 'N/A')}")
+                    st.markdown(f"**📞 Phone:** {lead.get('phone', 'N/A')}")
+                    st.markdown(f"**🌐 Website:** {lead.get('website', 'N/A')}")
+                with col2:
+                    st.markdown(f"**📧 Email:** {lead.get('email', 'N/A')}")
+                    st.markdown(f"**📂 Category:** {lead.get('category', 'N/A')}")
+                    st.markdown(f"**📅 Added:** {lead['created_at'][:10]}")
+                
+                st.markdown("---")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if st.button(f"📝 View Proposal", key=f"view_{lead['id']}"):
+                        st.session_state.selected_company = lead
+                        st.session_state.current_page = 'proposal_preview'
+                        st.rerun()
+                
+                with col2:
+                    if not lead.get('email_sent'):
+                        email = lead.get('email', '')
+                        if not email and lead.get('website'):
+                            try:
+                                ext = tldextract.extract(lead['website'])
+                                email = f"info@{ext.domain}.{ext.suffix}"
+                            except:
+                                pass
+                        new_email = st.text_input("Email", value=email, key=f"email_crm_{lead['id']}")
+                        if st.button(f"📧 Send Email", key=f"send_{lead['id']}"):
+                            if new_email:
+                                proposal_html = get_proposal_html(lead['name'])
+                                subject = f"FREE 5-Step Email & IT Health Check - For {lead['name']}"
+                                success, msg = send_email(new_email, subject, proposal_html)
+                                if success:
+                                    lead['email_sent'] = True
+                                    save_leads()
+                                    st.success(f"Email sent to {lead['name']}")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Failed: {msg}")
+                            else:
+                                st.warning("Please enter an email address")
+                
+                with col3:
+                    if st.button(f"🗑️ Delete", key=f"del_{lead['id']}"):
+                        st.session_state.leads = [l for l in st.session_state.leads if l['id'] != lead['id']]
+                        save_leads()
+                        st.success(f"Deleted {lead['name']}")
+                        st.rerun()
+    else:
+        st.info("No leads yet. Run a search to find companies.")
 
-if st.session_state.leads:
-search = st.text_input("🔍 Search", placeholder="Search by name, address, or category")
-
-filtered = st.session_state.leads
-if search:
-filtered = [l for l in filtered if search.lower() in l.get('name', '').lower() or search.lower() in l.get('address', '').lower() or search.lower() in l.get('category', '').lower()]
-
-for lead in filtered:
-with st.expander(f"🏢 {lead['name']} - Score: {lead['lead_score']}/100"):
-col1, col2 = st.columns(2)
-with col1:
-st.markdown(f"📍 Address: {lead.get('address', 'N/A')}")
-st.markdown(f"📞 Phone: {lead.get('phone', 'N/A')}")
-st.markdown(f"🌐 Website: {lead.get('website', 'N/A')}")
-with col2:
-st.markdown(f"📧 Email: {lead.get('email', 'N/A')}")
-st.markdown(f"📂 Category: {lead.get('category', 'N/A')}")
-st.markdown(f"📅 Added: {lead['created_at'][:10]}")
-
-st.markdown("---")
-
-col1, col2, col3 = st.columns(3)
-with col1:
-if st.button(f"📝 View Proposal", key=f"view_{lead['id']}"):
-st.session_state.selected_company = lead
-st.session_state.current_page = 'proposal_preview'
-st.rerun()
-
-with col2:
-if not lead.get('email_sent'):
-email = lead.get('email', '')
-if not email and lead.get('website'):
-ext = tldextract.extract(lead['website'])
-email = f"info@{ext.domain}.{ext.suffix}"
-new_email = st.text_input("Email", value=email, key=f"email_crm_{lead['id']}")
-if st.button(f"📧 Send Email", key=f"send_{lead['id']}"):
-if new_email:
-proposal_html = get_proposal_html(lead['name'])
-subject = f"FREE 5-Step Email & IT Health Check - For {lead['name']}"
-success, msg = send_email(new_email, subject, proposal_html)
-if success:
-lead['email_sent'] = True
-save_leads()
-st.success(f"Email sent to {lead['name']}")
-st.rerun()
-else:
-st.error(f"Failed: {msg}")
-else:
-st.warning("Please enter an email address")
-
-with col3:
-if st.button(f"🗑️ Delete", key=f"del_{lead['id']}"):
-st.session_state.leads = [l for l in st.session_state.leads if l['id'] != lead['id']]
-save_leads()
-st.success(f"Deleted {lead['name']}")
-st.rerun()
-else:
-st.info("No leads yet. Run a search to find companies.")
-
-============ EMAIL LOG ============
+# ============ EMAIL LOG ============
 elif st.session_state.current_page == 'email_log':
-st.markdown('<div class="section-header">📧 Email Log</div>', unsafe_allow_html=True)
-st.markdown("---")
+    st.markdown('<div class="section-header">📧 Email Log</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    
+    if st.session_state.email_log:
+        for log in reversed(st.session_state.email_log[-50:]):
+            st.markdown(f"""
+            <div class="data-card">
+                <strong>To:</strong> {log['to']}<br>
+                <strong>Company:</strong> {log['company']}<br>
+                <strong>Date:</strong> {log['date'][:19]}<br>
+                <strong>Status:</strong> ✅ {log['status']}
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No emails sent yet")
 
-if st.session_state.email_log:
-for log in reversed(st.session_state.email_log[-50:]):
-st.markdown(f"""
-
-<div class="data-card"> <strong>To:</strong> {log['to']}<br> <strong>Company:</strong> {log['company']}<br> <strong>Date:</strong> {log['date'][:19]}<br> <strong>Status:</strong> ✅ {log['status']} </div> """, unsafe_allow_html=True) else: st.info("No emails sent yet")
-============ LETTER QUEUE ============
+# ============ LETTER QUEUE ============
 elif st.session_state.current_page == 'letter_queue':
-st.markdown('<div class="section-header">📋 Letter Queue</div>', unsafe_allow_html=True)
-st.caption("Companies ready for physical mailing")
-st.markdown("---")
+    st.markdown('<div class="section-header">📋 Letter Queue</div>', unsafe_allow_html=True)
+    st.caption("Companies ready for physical mailing")
+    st.markdown("---")
+    
+    if st.session_state.letter_queue:
+        for idx, letter in enumerate(st.session_state.letter_queue):
+            with st.expander(f"🏢 {letter.get('company', 'Unknown')}"):
+                letter_content = get_letter_content(letter.get('company', 'Business'))
+                st.code(letter_content, language='text')
+                if st.button(f"📄 Download Letter", key=f"download_{idx}"):
+                    st.download_button(
+                        label="Download",
+                        data=letter_content,
+                        file_name=f"letter_{letter.get('company', 'business').replace(' ', '_')}.txt",
+                        mime="text/plain",
+                        key=f"btn_{idx}"
+                    )
+    else:
+        st.success("No pending letters")
 
-if st.session_state.letter_queue:
-for idx, letter in enumerate(st.session_state.letter_queue):
-with st.expander(f"🏢 {letter.get('company', 'Unknown')}"):
-letter_content = get_letter_content(letter.get('company', 'Business'))
-st.code(letter_content, language='text')
-if st.button(f"📄 Download Letter", key=f"download_{idx}"):
-st.download_button(
-label="Download",
-data=letter_content,
-file_name=f"letter_{letter.get('company', 'business').replace(' ', '')}.txt",
-mime="text/plain",
-key=f"btn{idx}"
-)
-else:
-st.success("No pending letters")
-
-============ SETTINGS ============
+# ============ SETTINGS ============
 elif st.session_state.current_page == 'settings':
-st.markdown('<div class="section-header">⚙️ Settings</div>', unsafe_allow_html=True)
-st.markdown("---")
+    st.markdown('<div class="section-header">⚙️ Settings</div>', unsafe_allow_html=True)
+    st.markdown("---")
+    
+    st.markdown("### API Configuration")
+    st.code("""
+    # .streamlit/secrets.toml
+    GOOGLE_MAPS_API_KEY = "your_google_maps_api_key"
+    """)
+    
+    st.markdown("### Email Configuration")
+    st.info(f"""
+    **SMTP Settings:**
+    - Host: {SMTP_CONFIG['host']}
+    - Port: {SMTP_CONFIG['port']}
+    - Username: {SMTP_CONFIG['username']}
+    - Daily Limit: {SMTP_CONFIG['daily_limit']} emails/day
+    """)
+    
+    new_limit = st.number_input("Daily Email Limit", min_value=10, max_value=200, value=SMTP_CONFIG['daily_limit'], key="daily_limit_input")
+    if st.button("Update Limit", key="update_limit"):
+        SMTP_CONFIG['daily_limit'] = new_limit
+        st.success(f"Daily limit updated to {new_limit}")
+    
+    st.markdown("### Data Management")
+    if st.button("Clear All Data", key="clear_data", type="secondary"):
+        st.session_state.leads = []
+        st.session_state.email_log = []
+        st.session_state.batch_results = []
+        st.session_state.letter_queue = []
+        save_leads()
+        save_email_log()
+        st.success("All data cleared")
+        st.rerun()
 
-st.markdown("### API Configuration")
-st.code("""
-
-.streamlit/secrets.toml
-GOOGLE_MAPS_API_KEY = "your_google_maps_api_key"
-""")
-
-st.markdown("### Email Configuration")
-st.info(f"""
-SMTP Settings:
-
-Host: {SMTP_CONFIG['host']}
-
-Port: {SMTP_CONFIG['port']}
-
-Username: {SMTP_CONFIG['username']}
-
-Daily Limit: {SMTP_CONFIG['daily_limit']} emails/day
-""")
-
-new_limit = st.number_input("Daily Email Limit", min_value=10, max_value=200, value=SMTP_CONFIG['daily_limit'], key="daily_limit_input")
-if st.button("Update Limit", key="update_limit"):
-SMTP_CONFIG['daily_limit'] = new_limit
-st.success(f"Daily limit updated to {new_limit}")
-
-st.markdown("### Data Management")
-if st.button("Clear All Data", key="clear_data", type="secondary"):
-st.session_state.leads = []
-st.session_state.email_log = []
-st.session_state.batch_results = []
-st.session_state.letter_queue = []
-save_leads()
-save_email_log()
-st.success("All data cleared")
-st.rerun()
-
-============ FOOTER ============
+# ============ FOOTER ============
 st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
 st.caption("2024 TechWokx IT Solutions | Professional IT Outreach | Powered by Google Places API")
