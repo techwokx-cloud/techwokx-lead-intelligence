@@ -13,6 +13,7 @@ from io import BytesIO
 import base64
 import re
 import tldextract
+import socket
 
 # ============ PAGE CONFIG ============
 st.set_page_config(
@@ -100,7 +101,7 @@ SMTP_CONFIG = {
     "sent_today": 0
 }
 
-# ============ API KEYS (from secrets) ============
+# ============ API KEYS ============
 def get_api_keys():
     try:
         return {
@@ -110,14 +111,170 @@ def get_api_keys():
     except:
         return {"google_maps": "", "serp_api": ""}
 
-# ============ ALL 16 REGIONS OF GHANA ============
+# ============ WEBSITE & EMAIL ENRICHMENT FUNCTIONS ============
+
+def check_website_status(url):
+    """Check if website is accessible"""
+    if not url:
+        return {"working": False, "error": "No website"}
+    try:
+        if not url.startswith("http"):
+            url = "https://" + url
+        response = requests.get(url, timeout=5, verify=False)
+        return {"working": response.status_code == 200, "status_code": response.status_code}
+    except:
+        return {"working": False, "error": "Connection failed"}
+
+def search_website_by_name(serp_api_key, business_name):
+    """Search Google for business website using SERP API"""
+    if not serp_api_key:
+        return None
+    
+    try:
+        url = "https://serpapi.com/search"
+        params = {
+            "api_key": serp_api_key,
+            "q": f"{business_name} Ghana official website",
+            "engine": "google",
+            "num": 5
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        # Check knowledge graph first
+        if "knowledge_graph" in data:
+            kg = data["knowledge_graph"]
+            website = kg.get("website", "")
+            if website:
+                return website
+        
+        # Check organic results
+        if "organic_results" in data:
+            for result in data["organic_results"][:3]:
+                link = result.get("link", "")
+                if link and "facebook" not in link and "twitter" not in link and "linkedin" not in link:
+                    # Extract domain
+                    domain = re.sub(r'^https?://', '', link).split('/')[0]
+                    if '.' in domain and len(domain) > 5:
+                        return link
+        
+        return None
+    except Exception as e:
+        return None
+
+def generate_possible_emails(company_name, domain=None):
+    """Generate possible email patterns for a company"""
+    emails = []
+    name_parts = company_name.lower().replace('&', 'and').split()
+    base_name = ''.join(name_parts[:2]) if len(name_parts) > 1 else name_parts[0]
+    
+    # Common email patterns
+    patterns = [
+        f"info@{base_name}.com",
+        f"contact@{base_name}.com",
+        f"hello@{base_name}.com",
+        f"support@{base_name}.com",
+        f"sales@{base_name}.com",
+        f"admin@{base_name}.com",
+        f"{base_name}@{base_name}.com"
+    ]
+    
+    # If domain provided, use that
+    if domain:
+        clean_domain = domain.replace('www.', '').replace('http://', '').replace('https://', '').split('/')[0]
+        patterns = [
+            f"info@{clean_domain}",
+            f"contact@{clean_domain}",
+            f"hello@{clean_domain}",
+            f"admin@{clean_domain}"
+        ]
+    
+    return patterns
+
+def find_email_from_website(website):
+    """Try to find email from website if accessible"""
+    if not website:
+        return None
+    
+    try:
+        if not website.startswith("http"):
+            website = "https://" + website
+        
+        response = requests.get(website, timeout=10, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        
+        if response.status_code == 200:
+            # Find emails in HTML
+            email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+            emails = re.findall(email_pattern, response.text)
+            
+            # Filter common false positives
+            exclude = ['example', 'test', 'noreply', 'jpg', 'png', 'css']
+            valid_emails = [e for e in emails if not any(x in e.lower() for x in exclude)]
+            
+            # Prioritize business emails
+            business_keywords = ['info', 'contact', 'hello', 'support', 'sales', 'admin']
+            for email in valid_emails:
+                if any(kw in email.lower() for kw in business_keywords):
+                    return email
+            
+            if valid_emails:
+                return valid_emails[0]
+        
+        return None
+    except:
+        return None
+
+def enrich_company_data(company, serp_api_key):
+    """Enrich company data with missing website and email"""
+    
+    # Check if website is working
+    website_status = None
+    if company.get('website'):
+        website_status = check_website_status(company['website'])
+        if not website_status['working']:
+            # Website not working, try to find working one
+            found_website = search_website_by_name(serp_api_key, company['name'])
+            if found_website:
+                company['website'] = found_website
+                website_status = check_website_status(found_website)
+    
+    # If no website, try to find one
+    if not company.get('website'):
+        found_website = search_website_by_name(serp_api_key, company['name'])
+        if found_website:
+            company['website'] = found_website
+            website_status = check_website_status(found_website)
+    
+    # If no email, try to find one
+    if not company.get('email'):
+        # First try to extract from website
+        if company.get('website'):
+            email = find_email_from_website(company['website'])
+            if email:
+                company['email'] = email
+        
+        # If still no email, generate possible emails
+        if not company.get('email'):
+            possible_emails = generate_possible_emails(company['name'], company.get('website'))
+            company['possible_emails'] = possible_emails
+        else:
+            company['possible_emails'] = []
+    
+    # Add website status
+    company['website_working'] = website_status['working'] if website_status else None
+    
+    return company
+
+# ============ ALL 16 REGIONS ============
 ALL_LOCATIONS = {
     "Greater Accra Region": {
         "Accra Metropolitan": ["Airport Residential", "Cantonments", "Labone", "Osu", "Ring Road Central", "Ridge", "North Ridge", "Adabraka", "Kaneshie", "Achimota", "Legon", "Madina", "Adenta", "East Legon", "West Legon", "Dzorwulu", "Labadi", "Teshie", "Nungua", "Spintex", "Sakumono", "Ashaiman", "Tema"],
         "Ga East": ["Abokobi", "Danfa", "Teiman", "Taifa", "Kwabenya", "Dome", "Pokuase", "Haasto"],
         "Ga West": ["Amasaman", "Nsawam", "Medie", "Sarpeiman"],
         "Ga South": ["Weija", "Gbawe", "Mallam", "Kwashieman", "Darkuman", "Kasoa", "Budumburam", "Opeikuma"],
-        "Tema Metropolitan": ["Tema Community 1", "Tema Community 2", "Tema Community 3", "Tema Community 4", "Tema Community 5", "Tema Community 6", "Tema Community 7", "Tema Community 8", "Tema Community 9", "Tema Community 10", "Tema Industrial Area", "Kpone", "Sakumono", "Lashibi", "Adjei Kojo", "Afienya", "Dawhenya", "Prampram"]
+        "Tema Metropolitan": ["Tema Community 1-10", "Tema Industrial Area", "Kpone", "Sakumono", "Lashibi", "Adjei Kojo", "Afienya", "Dawhenya", "Prampram"]
     },
     "Ashanti Region": {
         "Kumasi Metropolitan": ["Adum", "Bantama", "Asafo", "Asokwa", "Tafo", "Suame", "Oforikrom", "Ayigya", "Bohyen", "Kaase", "Danyame", "Amakom", "Buokrom", "Kwadaso", "Nhyiaeso", "Abuakwa", "Mampong", "Atonsu", "Ahinsan", "Boadi", "Kentinkrono", "Ayeduase", "Kotei", "Santasi"],
@@ -193,7 +350,7 @@ SEARCH_QUERIES = {
     "Insurance": "insurance company",
 }
 
-# ============ QR CODE GENERATION ============
+# ============ QR CODE ============
 def generate_qr_code_base64(url):
     try:
         qr = qrcode.QRCode(version=1, box_size=10, border=4)
@@ -206,11 +363,10 @@ def generate_qr_code_base64(url):
     except:
         return ""
 
-# ============ FIXED PROPOSAL DISPLAY (Plain Text with Markdown) ============
+# ============ PROPOSAL FUNCTIONS ============
 def display_proposal(company_name):
-    """Display proposal as formatted markdown (not raw HTML)"""
+    """Display proposal as formatted markdown"""
     audit_url = "https://techwokx.online/#audit"
-    qr_base64 = generate_qr_code_base64(audit_url)
     
     st.markdown(f"""
     ## 🔍 TechWokx IT Solutions
@@ -224,39 +380,30 @@ def display_proposal(company_name):
     
     My name is **George Jabley**, and I represent **TechWokx IT Solutions**. We help businesses improve their technology operations through reliable email systems, IT support, backup solutions, infrastructure reviews, and business continuity planning.
     
-    As part of our business outreach program, we conducted a high-level review of your organization's publicly available digital presence, including your website, domain configuration, SSL certificate status, and email setup.
+    As part of our business outreach program, we conducted a high-level review of your organization's publicly available digital presence.
     
     ---
     
     ### 📋 What We Observed
     
-    - We were unable to verify whether all recommended email authentication records (SPF/DKIM/DMARC) are fully configured.
-    - Your company logo does not currently appear alongside emails in supported inboxes.
-    - There may be opportunities to improve email deliverability and trust indicators.
-    - We could not verify the existence of backup and recovery measures protecting business-critical communications and data.
-    - Potential printer and network issues that could be causing daily operational friction.
-    
-    *Please note that this review was conducted using publicly available information and from outside your network environment. As such, some findings may already have been addressed internally, and a more detailed assessment would be required to confirm their status.*
+    - Email authentication records (SPF/DKIM/DMARC) may need configuration
+    - Email deliverability and trust indicators could be improved
+    - Backup and recovery measures need verification
+    - Potential printer and network issues affecting daily operations
     
     ---
     
     ### ⚠️ Why This Matters
     
-    Modern businesses rely heavily on email, cloud services, and digital communication. When these systems are not properly configured or maintained, organizations may experience:
-    
-    - Emails being delivered to spam or junk folders
-    - Reduced trust in business communications
-    - Difficulty identifying fraudulent communications
+    Modern businesses rely heavily on email and digital communication. When systems are not properly configured, organizations may experience:
+    - Emails delivered to spam folders
+    - Reduced trust in communications
     - Loss of important business data
     - Increased downtime during technical issues
-    - Challenges recovering from accidental deletions or system failures
-    - Printer and network disruptions affecting productivity
     
     ---
     
     ### 🛠️ How TechWokx Can Help
-    
-    We provide practical technology solutions designed to improve reliability, productivity, and business continuity.
     
     **Our services include:**
     - ✓ Business Email Health Checks
@@ -267,26 +414,16 @@ def display_proposal(company_name):
     - ✓ Printer & Network Troubleshooting
     - ✓ Backup & Recovery Solutions
     - ✓ Cloud Productivity Solutions
-    - ✓ Process Automation
     
     ---
     
     ### 🎁 TWO COMPLIMENTARY OFFERS
     
-    **1. Find Out Yourself: 5-Step Email & IT Health Check**
-    
-    To receive your complimentary assessment:
-    
-    **Visit:** [techwokx.online/#audit]({audit_url})
-    
-    The assessment takes less than five minutes and provides:
-    - A personalized technology health score
-    - Email configuration insights
-    - Security recommendations
+    **1. 5-Step Email & IT Health Check**
+    Visit: [techwokx.online/#audit]({audit_url})
     
     **2. Free 15-Minute IT Consultation**
-    
-    Discuss your specific challenges and get expert advice at no cost.
+    Call: +233 555 087 407
     
     ---
     
@@ -303,13 +440,11 @@ def display_proposal(company_name):
     
     ---
     *© 2024 TechWokx IT Solutions | Intelligent Solutions. Secure Futures.*
-    *P.O. Box ML469, Malam, Accra, Ghana*
     """, unsafe_allow_html=True)
 
 def get_email_body(company_name):
     """Generate email body (HTML for email clients)"""
     audit_url = "https://techwokx.online/#audit"
-    qr_base64 = generate_qr_code_base64(audit_url)
     
     return f"""
     <!DOCTYPE html>
@@ -318,11 +453,9 @@ def get_email_body(company_name):
         <meta charset="UTF-8">
         <title>TechWokx IT Assessment</title>
         <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
             .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
             .header {{ background: #667eea; color: white; padding: 20px; text-align: center; }}
-            .content {{ padding: 20px; }}
-            .footer {{ background: #f0f0f0; padding: 15px; text-align: center; font-size: 12px; }}
         </style>
     </head>
     <body>
@@ -333,15 +466,8 @@ def get_email_body(company_name):
             </div>
             <div class="content">
                 <p>Dear Sir/Madam,</p>
-                <p>I hope this letter finds you well.</p>
-                <p>My name is <strong>George Jabley</strong>, and I represent <strong>TechWokx IT Solutions</strong>.</p>
-                <p>As part of our business outreach program, we conducted a high-level review of your organization's digital presence.</p>
-                <h3>What We Observed</h3>
-                <ul>
-                    <li>Email authentication records may need configuration</li>
-                    <li>Email deliverability could be improved</li>
-                    <li>Backup and recovery measures need verification</li>
-                </ul>
+                <p>My name is <strong>George Jabley</strong> from <strong>TechWokx IT Solutions</strong>.</p>
+                <p>As part of our business outreach program, we reviewed your organization's digital presence.</p>
                 <h3>Two Complimentary Offers</h3>
                 <p><strong>1. 5-Step Email & IT Health Check</strong><br>
                 Visit: <a href="{audit_url}">techwokx.online/#audit</a></p>
@@ -350,9 +476,6 @@ def get_email_body(company_name):
                 <p>Best regards,<br>
                 George Jabley<br>
                 TechWokx Ghana</p>
-            </div>
-            <div class="footer">
-                <p>© 2024 TechWokx IT Solutions | P.O. Box ML469, Malam, Accra, Ghana</p>
             </div>
         </div>
     </body>
@@ -378,17 +501,7 @@ Ghana
 
 Dear Sir/Madam,
 
-I hope this letter finds you well.
-
-My name is George Jabley, and I represent TechWokx IT Solutions.
-
-================================================================================
-                          WHAT WE OBSERVED
-================================================================================
-
-• Email authentication records may need configuration
-• Email deliverability could be improved
-• Backup and recovery measures need verification
+My name is George Jabley from TechWokx IT Solutions.
 
 ================================================================================
                     TWO COMPLIMENTARY OFFERS
@@ -405,7 +518,6 @@ My name is George Jabley, and I represent TechWokx IT Solutions.
 Warm regards,
 
 George Jabley
-Founder & IT Operations Lead
 TechWokx Ghana
 📞 +233 555 087 407
 📧 hello@techwokx.online
@@ -457,22 +569,12 @@ def search_google_places(api_key, query, location):
             details_response = requests.get(details_url, params=details_params, timeout=10)
             details = details_response.json().get('result', {})
             
-            website = details.get('website', '')
-            email = ""
-            if website:
-                try:
-                    ext = tldextract.extract(website)
-                    domain = f"{ext.domain}.{ext.suffix}"
-                    email = f"info@{domain}"
-                except:
-                    pass
-            
             businesses.append({
                 "name": place.get('name'),
                 "address": details.get('formatted_address', place.get('vicinity', '')),
                 "phone": details.get('formatted_phone_number', ''),
-                "website": website,
-                "email": email,
+                "website": details.get('website', ''),
+                "email": "",
                 "rating": details.get('rating', 0),
                 "place_id": place.get('place_id')
             })
@@ -521,6 +623,8 @@ def add_lead(lead_data):
         "phone": lead_data.get("phone", ""),
         "website": lead_data.get("website", ""),
         "email": lead_data.get("email", ""),
+        "possible_emails": lead_data.get("possible_emails", []),
+        "website_working": lead_data.get("website_working", None),
         "category": lead_data.get("category", ""),
         "rating": lead_data.get("rating", 0),
         "lead_score": 75,
@@ -547,6 +651,8 @@ st.markdown("""
 .custom-divider { height: 1px; background: #e2e8f0; margin: 1rem 0; }
 .stButton > button { background: linear-gradient(135deg, #667eea, #764ba2); color: white; font-weight: 600; border: none; border-radius: 8px; }
 .proposal-container { background: white; border-radius: 12px; padding: 2rem; border: 1px solid #e2e8f0; }
+.website-broken { color: #dc2626; font-size: 0.8rem; }
+.website-working { color: #22c55e; font-size: 0.8rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -602,7 +708,9 @@ with st.sidebar:
     st.markdown("---")
     api_keys = get_api_keys()
     maps_status = "✅" if api_keys["google_maps"] else "❌"
+    serp_status = "✅" if api_keys["serp_api"] else "❌"
     st.markdown(f"Google Maps: {maps_status}")
+    st.markdown(f"SERP API: {serp_status}")
     st.markdown(f"Leads: {len(st.session_state.leads)}")
     st.markdown(f"Emails Today: {SMTP_CONFIG['sent_today']}/{SMTP_CONFIG['daily_limit']}")
 
@@ -611,7 +719,7 @@ if st.session_state.current_page == 'dashboard':
     st.markdown("""
     <div class="welcome-card">
         <h2>TechWokx Lead Intelligence</h2>
-        <p>Professional IT Outreach | Google Places API | All 16 Regions of Ghana</p>
+        <p>Professional IT Outreach | Google Places API | SERP API Enrichment</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -646,7 +754,7 @@ if st.session_state.current_page == 'dashboard':
 # ============ SEARCH COMPANIES ============
 if st.session_state.current_page == 'search':
     st.markdown('<div class="section-header">🔍 Search Companies</div>', unsafe_allow_html=True)
-    st.caption("Find real businesses across all 16 regions of Ghana using Google Places API")
+    st.caption("Find real businesses across Ghana - Missing websites/emails will be enriched automatically")
     st.markdown("---")
     
     api_keys = get_api_keys()
@@ -676,6 +784,7 @@ if st.session_state.current_page == 'search':
         categories = list(SEARCH_QUERIES.keys())
         selected_category = st.selectbox("Business Category", categories)
     
+    enrich_data = st.checkbox("Enrich missing data (website/email search)", value=True)
     limit = st.slider("Number of Companies", 5, 30, 15)
     
     if st.button("🔍 Search", type="primary"):
@@ -689,6 +798,11 @@ if st.session_state.current_page == 'search':
                     biz["town"] = selected_town
                     biz["district"] = selected_district
                     biz["region"] = selected_region
+                    
+                    # Enrich with website and email if requested
+                    if enrich_data and api_keys["serp_api"]:
+                        with st.spinner(f"Enriching {biz['name']}..."):
+                            biz = enrich_company_data(biz, api_keys["serp_api"])
                 
                 st.session_state.batch_results = businesses[:limit]
                 st.success(f"Found {len(businesses)} businesses in {selected_town}")
@@ -702,11 +816,31 @@ if st.session_state.current_page == 'search':
                 with col1:
                     st.markdown(f"**📍 Address:** {company.get('address', 'N/A')}")
                     st.markdown(f"**📞 Phone:** {company.get('phone', 'N/A')}")
-                    st.markdown(f"**🌐 Website:** {company.get('website', 'N/A')}")
+                    website = company.get('website', '')
+                    if website:
+                        working = company.get('website_working')
+                        if working is True:
+                            st.markdown(f"**🌐 Website:** {website} ✅")
+                        elif working is False:
+                            st.markdown(f"**🌐 Website:** {website} ❌ (Not working)")
+                        else:
+                            st.markdown(f"**🌐 Website:** {website}")
+                    else:
+                        st.markdown(f"**🌐 Website:** Not found")
                 with col2:
-                    st.markdown(f"**📧 Email:** {company.get('email', 'N/A')}")
+                    email = company.get('email', '')
+                    if email:
+                        st.markdown(f"**📧 Email:** {email}")
+                    else:
+                        st.markdown(f"**📧 Email:** Not found")
                     st.markdown(f"**⭐ Rating:** {'⭐' * int(company.get('rating', 0))} {company.get('rating', 'N/A')}")
                     st.markdown(f"**📂 Category:** {selected_category}")
+                
+                # Show possible emails if available
+                if company.get('possible_emails'):
+                    st.markdown("**💡 Suggested Emails to Try:**")
+                    for pe in company['possible_emails'][:3]:
+                        st.markdown(f"- {pe}")
                 
                 st.markdown("---")
                 
@@ -726,23 +860,27 @@ if st.session_state.current_page == 'search':
                             st.warning("Company already exists in CRM")
                 
                 with col3:
-                    email = company.get('email', '')
-                    if not email and company.get('website'):
-                        try:
-                            ext = tldextract.extract(company['website'])
-                            email = f"info@{ext.domain}.{ext.suffix}"
-                        except:
-                            pass
-                    new_email = st.text_input("Email", value=email, key=f"email_input_{idx}")
+                    # Email input with suggested emails as dropdown
+                    email_options = []
+                    if company.get('email'):
+                        email_options.append(company['email'])
+                    if company.get('possible_emails'):
+                        email_options.extend(company['possible_emails'][:3])
+                    
+                    if email_options:
+                        selected_email = st.selectbox("Select Email", email_options, key=f"email_select_{idx}")
+                    else:
+                        selected_email = st.text_input("Email Address", value="", key=f"email_input_{idx}")
+                    
                     if st.button("📧 Send Email", key=f"send_{idx}"):
-                        if new_email:
+                        if selected_email:
                             email_body = get_email_body(company['name'])
                             subject = f"FREE 5-Step Email & IT Health Check - For {company['name']}"
-                            success, msg = send_email(new_email, subject, email_body)
+                            success, msg = send_email(selected_email, subject, email_body)
                             if success:
                                 st.success(f"Email sent to {company['name']}")
                                 st.session_state.email_log.append({
-                                    "to": new_email,
+                                    "to": selected_email,
                                     "company": company['name'],
                                     "subject": subject,
                                     "date": datetime.now().isoformat(),
@@ -753,7 +891,7 @@ if st.session_state.current_page == 'search':
                             else:
                                 st.error(f"Failed: {msg}")
                         else:
-                            st.warning("Please enter an email address")
+                            st.warning("Please select/enter an email address")
                 
                 with col4:
                     if st.button("📄 Download Letter", key=f"letter_{idx}"):
@@ -784,10 +922,34 @@ elif st.session_state.current_page == 'proposal_preview' and st.session_state.se
         st.markdown(f"**Name:** {company['name']}")
         st.markdown(f"**Address:** {company.get('address', 'N/A')}")
         st.markdown(f"**Phone:** {company.get('phone', 'N/A')}")
-        st.markdown(f"**Website:** {company.get('website', 'N/A')}")
-        st.markdown(f"**Email:** {company.get('email', 'N/A')}")
+        
+        website = company.get('website', '')
+        if website:
+            working = company.get('website_working')
+            if working is True:
+                st.markdown(f"**Website:** {website} ✅")
+            elif working is False:
+                st.markdown(f"**Website:** {website} ❌ (Not working)")
+            else:
+                st.markdown(f"**Website:** {website}")
+        else:
+            st.markdown(f"**Website:** Not found")
+        
+        email = company.get('email', '')
+        if email:
+            st.markdown(f"**Email:** {email}")
+        else:
+            st.markdown(f"**Email:** Not found")
+        
         st.markdown(f"**Category:** {company.get('category', 'N/A')}")
         st.markdown(f"**Rating:** {'⭐' * int(company.get('rating', 0))} {company.get('rating', 'N/A')}")
+        
+        # Show possible emails
+        if company.get('possible_emails'):
+            st.markdown("---")
+            st.markdown("### 💡 Suggested Emails")
+            for pe in company['possible_emails'][:3]:
+                st.markdown(f"- {pe}")
         
         st.markdown("---")
         st.markdown("### Actions")
@@ -798,24 +960,27 @@ elif st.session_state.current_page == 'proposal_preview' and st.session_state.se
             else:
                 st.warning("Company already exists in CRM")
         
-        email = company.get('email', '')
-        if not email and company.get('website'):
-            try:
-                ext = tldextract.extract(company['website'])
-                email = f"info@{ext.domain}.{ext.suffix}"
-            except:
-                pass
+        # Email selection
+        email_options = []
+        if company.get('email'):
+            email_options.append(company['email'])
+        if company.get('possible_emails'):
+            email_options.extend(company['possible_emails'][:3])
         
-        email_input = st.text_input("Email Address", value=email)
+        if email_options:
+            selected_email = st.selectbox("Select Email", email_options)
+        else:
+            selected_email = st.text_input("Email Address", value="")
+        
         if st.button("📧 Send Email", use_container_width=True):
-            if email_input:
+            if selected_email:
                 email_body = get_email_body(company['name'])
                 subject = f"FREE 5-Step Email & IT Health Check - For {company['name']}"
-                success, msg = send_email(email_input, subject, email_body)
+                success, msg = send_email(selected_email, subject, email_body)
                 if success:
                     st.success(f"Email sent to {company['name']}")
                     st.session_state.email_log.append({
-                        "to": email_input,
+                        "to": selected_email,
                         "company": company['name'],
                         "subject": subject,
                         "date": datetime.now().isoformat(),
@@ -825,7 +990,7 @@ elif st.session_state.current_page == 'proposal_preview' and st.session_state.se
                 else:
                     st.error(f"Failed: {msg}")
             else:
-                st.warning("Please enter an email address")
+                st.warning("Please select/enter an email address")
         
         if st.button("📄 Download Letter", use_container_width=True):
             letter = get_letter_content(company['name'])
@@ -859,9 +1024,25 @@ elif st.session_state.current_page == 'crm':
                 with col1:
                     st.markdown(f"**📍 Address:** {lead.get('address', 'N/A')}")
                     st.markdown(f"**📞 Phone:** {lead.get('phone', 'N/A')}")
-                    st.markdown(f"**🌐 Website:** {lead.get('website', 'N/A')}")
+                    website = lead.get('website', '')
+                    if website:
+                        working = lead.get('website_working')
+                        if working is True:
+                            st.markdown(f"**🌐 Website:** {website} ✅")
+                        elif working is False:
+                            st.markdown(f"**🌐 Website:** {website} ❌")
+                        else:
+                            st.markdown(f"**🌐 Website:** {website}")
+                    else:
+                        st.markdown(f"**🌐 Website:** Not found")
                 with col2:
-                    st.markdown(f"**📧 Email:** {lead.get('email', 'N/A')}")
+                    email = lead.get('email', '')
+                    if email:
+                        st.markdown(f"**📧 Email:** {email}")
+                    else:
+                        st.markdown(f"**📧 Email:** Not found")
+                        if lead.get('possible_emails'):
+                            st.markdown(f"**💡 Try:** {lead['possible_emails'][0]}")
                     st.markdown(f"**📂 Category:** {lead.get('category', 'N/A')}")
                     st.markdown(f"**📅 Added:** {lead['created_at'][:10]}")
                 
@@ -877,12 +1058,9 @@ elif st.session_state.current_page == 'crm':
                 with col2:
                     if not lead.get('email_sent'):
                         email = lead.get('email', '')
-                        if not email and lead.get('website'):
-                            try:
-                                ext = tldextract.extract(lead['website'])
-                                email = f"info@{ext.domain}.{ext.suffix}"
-                            except:
-                                pass
+                        if not email and lead.get('possible_emails'):
+                            email = lead['possible_emails'][0]
+                        
                         new_email = st.text_input("Email", value=email, key=f"email_crm_{lead['id']}")
                         if st.button(f"📧 Send Email", key=f"send_{lead['id']}"):
                             if new_email:
@@ -957,6 +1135,7 @@ elif st.session_state.current_page == 'settings':
     st.code("""
     # .streamlit/secrets.toml
     GOOGLE_MAPS_API_KEY = "your_google_maps_api_key"
+    SERP_API_KEY = "your_serp_api_key"
     """)
     
     st.markdown("### Email Configuration")
@@ -986,4 +1165,4 @@ elif st.session_state.current_page == 'settings':
 
 # ============ FOOTER ============
 st.markdown('<div class="custom-divider"></div>', unsafe_allow_html=True)
-st.caption("2024 TechWokx IT Solutions | Professional IT Outreach | Powered by Google Places API")
+st.caption("2024 TechWokx IT Solutions | Professional IT Outreach | Powered by Google Places & SERP API")
